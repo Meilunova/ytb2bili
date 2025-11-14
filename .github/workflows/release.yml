@@ -1,9 +1,10 @@
-name: Build and Release
+# 暂时禁用原release workflow，使用simple-release.yml
+name: Build and Release (Disabled)
 
 on:
-  push:
-    tags:
-      - 'v*'
+  # push:
+  #   tags:
+  #     - 'v*'
   workflow_dispatch:
     inputs:
       version:
@@ -16,14 +17,15 @@ jobs:
     name: Build for ${{ matrix.os }}
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - os: windows
+          - os: windows-amd64
             goos: windows
             goarch: amd64
             ext: .exe
             name: ytb2bili-windows-amd64
-          - os: linux
+          - os: linux-amd64
             goos: linux
             goarch: amd64
             ext: ""
@@ -33,12 +35,12 @@ jobs:
             goarch: arm64
             ext: ""
             name: ytb2bili-linux-arm64
-          - os: macos
+          - os: darwin-amd64
             goos: darwin
             goarch: amd64
             ext: ""
             name: ytb2bili-darwin-amd64
-          - os: macos-arm64
+          - os: darwin-arm64
             goos: darwin
             goarch: arm64
             ext: ""
@@ -70,7 +72,7 @@ jobs:
         fi
 
     - name: Cache Go modules
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: ~/go/pkg/mod
         key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
@@ -78,7 +80,7 @@ jobs:
           ${{ runner.os }}-go-
 
     - name: Cache Node modules
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: ~/.npm
         key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
@@ -143,19 +145,24 @@ jobs:
       run: |
         cd release
         if [ "${{ matrix.goos }}" = "windows" ]; then
-          7z a ../${{ matrix.name }}.zip *
+          # 使用 zip 命令创建 Windows 压缩包
+          zip -r ../${{ matrix.name }}.zip *
+          # 创建空的 tar.gz 文件以避免上传错误
+          touch ../${{ matrix.name }}.tar.gz
         else
+          # 创建 Linux/macOS 压缩包
           tar -czf ../${{ matrix.name }}.tar.gz *
+          # 创建空的 zip 文件以避免上传错误
+          touch ../${{ matrix.name }}.zip
         fi
         cd ..
+        ls -la ${{ matrix.name }}.*
 
     - name: Upload artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: ${{ matrix.name }}
-        path: |
-          ${{ matrix.name }}.zip
-          ${{ matrix.name }}.tar.gz
+        path: ${{ matrix.name }}.*
         retention-days: 30
 
   release:
@@ -169,7 +176,15 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Download all artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: List downloaded artifacts
+      run: |
+        echo "📁 Downloaded artifacts structure:"
+        find artifacts -type f -name "*.zip" -o -name "*.tar.gz" | head -20
+        ls -la artifacts/*/
 
     - name: Get version
       id: version
@@ -214,21 +229,22 @@ jobs:
         draft: false
         prerelease: false
         files: |
-          ytb2bili-windows-amd64/ytb2bili-windows-amd64.zip
-          ytb2bili-linux-amd64/ytb2bili-linux-amd64.tar.gz
-          ytb2bili-linux-arm64/ytb2bili-linux-arm64.tar.gz
-          ytb2bili-darwin-amd64/ytb2bili-darwin-amd64.tar.gz
-          ytb2bili-darwin-arm64/ytb2bili-darwin-arm64.tar.gz
+          artifacts/ytb2bili-windows-amd64/ytb2bili-windows-amd64.zip
+          artifacts/ytb2bili-linux-amd64/ytb2bili-linux-amd64.tar.gz
+          artifacts/ytb2bili-linux-arm64/ytb2bili-linux-arm64.tar.gz
+          artifacts/ytb2bili-darwin-amd64/ytb2bili-darwin-amd64.tar.gz
+          artifacts/ytb2bili-darwin-arm64/ytb2bili-darwin-arm64.tar.gz
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # 可选: 自动构建 Docker 镜像 (需要配置 DOCKERHUB_USERNAME 和 DOCKERHUB_TOKEN secrets)
+  # 暂时禁用Docker构建，专注于二进制文件发布
   docker:
     name: Build Docker Image
     needs: build
     runs-on: ubuntu-latest
-    # 只有在推送标签且配置了Docker Hub secrets时才执行
-    if: github.event_name == 'push' && contains(github.ref, 'refs/tags/') && github.repository_owner == 'difyz9'
+    # 暂时禁用: if: false
+    if: false
     
     steps:
     - name: Checkout code
