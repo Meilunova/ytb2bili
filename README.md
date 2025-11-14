@@ -1088,9 +1088,11 @@ git push origin feature/your-feature-name
 [📖 文档](https://github.com/difyz9/ytb2bili/wiki) • 
 [💬 QQ群](https://qm.qq.com/cgi-bin/qm/qr?k=773066052) • 
 [💬 讨论](https://github.com/difyz9/ytb2bili/discussions)
-<img src="img/751763091471_.pic.jpg" alt="微信联系" width="200"/>
 
 </div>
+
+<img src="img/751763091471_.pic.jpg" alt="微信联系" width="200"/>
+
 
 ---
 
