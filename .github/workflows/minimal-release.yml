@@ -1,0 +1,180 @@
+name: Minimal Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+
+    - name: Get version
+      id: version
+      run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+    - name: Build all platforms
+      run: |
+        # Build for all platforms
+        LDFLAGS="-s -w -X main.Version=${{ steps.version.outputs.version }} -X main.BuildTime=$(date -u '+%Y-%m-%d_%H:%M:%S')"
+        
+        # Windows
+        GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="$LDFLAGS" -o ytb2bili-windows-amd64.exe .
+        
+        # Linux
+        GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="$LDFLAGS" -o ytb2bili-linux-amd64 .
+        GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="$LDFLAGS" -o ytb2bili-linux-arm64 .
+        
+        # macOS
+        GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="$LDFLAGS" -o ytb2bili-darwin-amd64 .
+        GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="$LDFLAGS" -o ytb2bili-darwin-arm64 .
+
+    - name: Create packages
+      run: |
+        # Create directories
+        mkdir -p packages
+        
+        # Copy config template
+        cp config.toml.example config.toml
+        
+        # Windows package
+        mkdir -p win64
+        cp ytb2bili-windows-amd64.exe win64/
+        cp config.toml win64/
+        cp README.md win64/
+        cat > win64/start.bat << 'EOF'
+        @echo off
+        echo Starting YTB2BILI Server...
+        ytb2bili-windows-amd64.exe
+        pause
+        EOF
+        cd win64 && zip -r ../packages/ytb2bili-windows-amd64.zip . && cd ..
+        
+        # Linux amd64 package
+        mkdir -p linux64
+        cp ytb2bili-linux-amd64 linux64/
+        cp config.toml linux64/
+        cp README.md linux64/
+        cat > linux64/start.sh << 'EOF'
+        #!/bin/bash
+        echo "Starting YTB2BILI Server..."
+        chmod +x ./ytb2bili-linux-amd64
+        ./ytb2bili-linux-amd64
+        EOF
+        chmod +x linux64/start.sh
+        tar -czf packages/ytb2bili-linux-amd64.tar.gz -C linux64 .
+        
+        # Linux ARM64 package
+        mkdir -p linux-arm64
+        cp ytb2bili-linux-arm64 linux-arm64/
+        cp config.toml linux-arm64/
+        cp README.md linux-arm64/
+        cat > linux-arm64/start.sh << 'EOF'
+        #!/bin/bash
+        echo "Starting YTB2BILI Server..."
+        chmod +x ./ytb2bili-linux-arm64
+        ./ytb2bili-linux-arm64
+        EOF
+        chmod +x linux-arm64/start.sh
+        tar -czf packages/ytb2bili-linux-arm64.tar.gz -C linux-arm64 .
+        
+        # macOS Intel package
+        mkdir -p macos-intel
+        cp ytb2bili-darwin-amd64 macos-intel/
+        cp config.toml macos-intel/
+        cp README.md macos-intel/
+        cat > macos-intel/start.sh << 'EOF'
+        #!/bin/bash
+        echo "Starting YTB2BILI Server..."
+        chmod +x ./ytb2bili-darwin-amd64
+        ./ytb2bili-darwin-amd64
+        EOF
+        chmod +x macos-intel/start.sh
+        tar -czf packages/ytb2bili-darwin-amd64.tar.gz -C macos-intel .
+        
+        # macOS Apple Silicon package
+        mkdir -p macos-arm64
+        cp ytb2bili-darwin-arm64 macos-arm64/
+        cp config.toml macos-arm64/
+        cp README.md macos-arm64/
+        cat > macos-arm64/start.sh << 'EOF'
+        #!/bin/bash
+        echo "Starting YTB2BILI Server..."
+        chmod +x ./ytb2bili-darwin-arm64
+        ./ytb2bili-darwin-arm64
+        EOF
+        chmod +x macos-arm64/start.sh
+        tar -czf packages/ytb2bili-darwin-arm64.tar.gz -C macos-arm64 .
+        
+        # List packages
+        ls -la packages/
+
+    - name: Generate changelog
+      run: |
+        cat > CHANGELOG.md << EOF
+        ## 🎉 YTB2BILI Release ${{ steps.version.outputs.version }}
+        
+        ### 📦 下载链接
+        
+        | 平台 | 架构 | 下载 | 大小 |
+        |------|------|------|------|
+        | 🪟 Windows | x64 | [ytb2bili-windows-amd64.zip](https://github.com/difyz9/ytb2bili/releases/download/${{ steps.version.outputs.version }}/ytb2bili-windows-amd64.zip) | $(du -h packages/ytb2bili-windows-amd64.zip | cut -f1) |
+        | 🐧 Linux | x64 | [ytb2bili-linux-amd64.tar.gz](https://github.com/difyz9/ytb2bili/releases/download/${{ steps.version.outputs.version }}/ytb2bili-linux-amd64.tar.gz) | $(du -h packages/ytb2bili-linux-amd64.tar.gz | cut -f1) |
+        | 🐧 Linux | ARM64 | [ytb2bili-linux-arm64.tar.gz](https://github.com/difyz9/ytb2bili/releases/download/${{ steps.version.outputs.version }}/ytb2bili-linux-arm64.tar.gz) | $(du -h packages/ytb2bili-linux-arm64.tar.gz | cut -f1) |
+        | 🍎 macOS | Intel | [ytb2bili-darwin-amd64.tar.gz](https://github.com/difyz9/ytb2bili/releases/download/${{ steps.version.outputs.version }}/ytb2bili-darwin-amd64.tar.gz) | $(du -h packages/ytb2bili-darwin-amd64.tar.gz | cut -f1) |
+        | 🍎 macOS | Apple Silicon | [ytb2bili-darwin-arm64.tar.gz](https://github.com/difyz9/ytb2bili/releases/download/${{ steps.version.outputs.version }}/ytb2bili-darwin-arm64.tar.gz) | $(du -h packages/ytb2bili-darwin-arm64.tar.gz | cut -f1) |
+        
+        ### 🚀 快速开始
+        
+        1. **下载** 对应平台的压缩包
+        2. **解压** 到任意目录
+        3. **配置** 编辑 \`config.toml\` 文件
+        4. **启动** 运行 \`start.sh\` 或 \`start.bat\`
+        5. **访问** http://localhost:8096
+        
+        ### ✨ 功能特性
+        
+        - 🎬 YouTube 视频自动下载
+        - 🎤 AI 自动生成字幕 (Whisper)
+        - 🌐 智能字幕翻译 (百度/DeepSeek)
+        - 🤖 AI 生成视频元数据
+        - 📺 自动上传到 Bilibili
+        - ⏰ 智能定时调度上传
+        
+        ### 🛠️ 系统要求
+        
+        - **内存**: 建议 4GB+ (用于视频处理)
+        - **存储**: 建议 10GB+ (用于视频缓存)
+        - **网络**: 稳定的互联网连接
+        
+        ### 🆘 获取帮助
+        
+        - 📖 [完整文档](https://github.com/difyz9/ytb2bili/blob/main/README.md)
+        - 🐛 [问题反馈](https://github.com/difyz9/ytb2bili/issues)
+        - 💬 QQ交流群: **773066052**
+        
+        ---
+        **构建时间**: $(date -u '+%Y-%m-%d %H:%M:%S') UTC  
+        **Go版本**: $(go version)
+        EOF
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        name: Release ${{ steps.version.outputs.version }}
+        body_path: CHANGELOG.md
+        files: packages/*
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

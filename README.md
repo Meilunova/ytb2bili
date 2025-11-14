@@ -912,7 +912,7 @@ go tool pprof http://localhost:8096/debug/pprof/heap
 > **🎉 自动构建**: 项目已配置 GitHub Actions，每次发布都会自动构建多平台二进制文件
 
 [![Build Test](https://github.com/difyz9/ytb2bili/actions/workflows/test.yml/badge.svg)](https://github.com/difyz9/ytb2bili/actions/workflows/test.yml)
-[![Build and Release](https://github.com/difyz9/ytb2bili/actions/workflows/release.yml/badge.svg)](https://github.com/difyz9/ytb2bili/actions/workflows/release.yml)
+[![Release](https://github.com/difyz9/ytb2bili/actions/workflows/minimal-release.yml/badge.svg)](https://github.com/difyz9/ytb2bili/actions/workflows/minimal-release.yml)
 
 **📥 快速下载** (免编译，开箱即用):
 

@@ -1,9 +1,10 @@
-name: Simple Release
+name: Simple Release (Disabled)
 
 on:
-  push:
-    tags:
-      - 'v*'
+  # Disabled - using minimal-release.yml instead
+  # push:
+  #   tags:
+  #     - 'v*'
   workflow_dispatch:
     inputs:
       version:
@@ -99,16 +100,21 @@ jobs:
         else
           cd release && tar -czf ../${{ matrix.name }}.tar.gz . && cd ..
         fi
-        ls -la ${{ matrix.name }}.*
 
-    - name: Upload build artifacts
+    - name: Upload Windows artifact
+      if: matrix.goos == 'windows'
       uses: actions/upload-artifact@v4
       with:
         name: ${{ matrix.name }}
-        path: |
-          ${{ matrix.name }}.zip
-          ${{ matrix.name }}.tar.gz
-        if-no-files-found: ignore
+        path: ${{ matrix.name }}.zip
+        retention-days: 7
+
+    - name: Upload Unix artifact
+      if: matrix.goos != 'windows'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.name }}
+        path: ${{ matrix.name }}.tar.gz
         retention-days: 7
 
   release:
