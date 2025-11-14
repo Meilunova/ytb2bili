@@ -1076,13 +1076,21 @@ git push origin feature/your-feature-name
 - **测试覆盖**: 新功能需要包含相应的单元测试
 - **文档更新**: 更新相关的 README 和 API 文档
 
-### 🙏 贡献者
+---
+<div align="center">
 
-感谢所有为这个项目做出贡献的开发者！
+**🎉 感谢使用 YTB2BILI！**
 
-<a href="https://github.com/difyz9/ytb2bili/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=difyz9/ytb2bili" />
-</a>
+如果这个项目对你有帮助，请给我们一个 ⭐️ 
+
+[🐛 报告问题](https://github.com/difyz9/ytb2bili/issues) • 
+[💡 功能建议](https://github.com/difyz9/ytb2bili/issues) • 
+[📖 文档](https://github.com/difyz9/ytb2bili/wiki) • 
+[💬 QQ群](https://qm.qq.com/cgi-bin/qm/qr?k=773066052) • 
+[💬 讨论](https://github.com/difyz9/ytb2bili/discussions)
+<img src="img/751763091471_.pic.jpg" alt="微信联系" width="200"/>
+
+</div>
 
 ---
 
@@ -1102,25 +1110,5 @@ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 copies of the Software...
 ```
 
----
 
-## 🌟 Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=difyz9/ytb2bili&type=Date)](https://star-history.com/#difyz9/ytb2bili&Date)
-
----
-
-<div align="center">
-
-**🎉 感谢使用 YTB2BILI！**
-
-如果这个项目对你有帮助，请给我们一个 ⭐️ 
-
-[🐛 报告问题](https://github.com/difyz9/ytb2bili/issues) • 
-[💡 功能建议](https://github.com/difyz9/ytb2bili/issues) • 
-[📖 文档](https://github.com/difyz9/ytb2bili/wiki) • 
-[💬 QQ群](https://qm.qq.com/cgi-bin/qm/qr?k=773066052) • 
-[💬 讨论](https://github.com/difyz9/ytb2bili/discussions)
-<img src="img/751763091471_.pic.jpg" alt="微信联系" width="200" height="500"/>
-
-</div>
