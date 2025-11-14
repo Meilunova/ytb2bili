@@ -12,6 +12,7 @@ config.toml
 .vscode/
 *.swp
 *.swo
+node_modules
 
 # 系统文件
 .DS_Store
@@ -32,6 +33,7 @@ build/
 node_modules/
 vendor/
 
+output/
 # 临时文件
 *.tmp
 *.temp

@@ -5,8 +5,8 @@ all: build
 
 # 项目路径
 ROOT_DIR := $(shell pwd)
-WEB_DIR := $(ROOT_DIR)/../bili-up-web
-OUT_DIR := $(WEB_DIR)/out
+WEB_DIR := $(ROOT_DIR)/web
+OUT_DIR := $(WEB_DIR)/output
 TARGET_DIR := $(ROOT_DIR)/internal/web/bili-up-web
 BINARY_NAME := bili-up-api-server
 
