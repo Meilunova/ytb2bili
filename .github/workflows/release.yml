@@ -1,0 +1,253 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+jobs:
+  build:
+    name: Build for ${{ matrix.os }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - os: windows
+            goos: windows
+            goarch: amd64
+            ext: .exe
+            name: ytb2bili-windows-amd64
+          - os: linux
+            goos: linux
+            goarch: amd64
+            ext: ""
+            name: ytb2bili-linux-amd64
+          - os: linux-arm64
+            goos: linux
+            goarch: arm64
+            ext: ""
+            name: ytb2bili-linux-arm64
+          - os: macos
+            goos: darwin
+            goarch: amd64
+            ext: ""
+            name: ytb2bili-darwin-amd64
+          - os: macos-arm64
+            goos: darwin
+            goarch: arm64
+            ext: ""
+            name: ytb2bili-darwin-arm64
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.24'
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+
+    - name: Get version
+      id: version
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+        else
+          echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Cache Go modules
+      uses: actions/cache@v3
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Cache Node modules
+      uses: actions/cache@v3
+      with:
+        path: ~/.npm
+        key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-node-
+
+    - name: Build frontend (if exists)
+      run: |
+        if [ -d "../bili-up-web" ]; then
+          echo "Building frontend..."
+          make build-web
+        else
+          echo "Frontend directory not found, skipping frontend build"
+        fi
+
+    - name: Download Go dependencies
+      run: go mod download
+
+    - name: Build binary
+      env:
+        GOOS: ${{ matrix.goos }}
+        GOARCH: ${{ matrix.goarch }}
+        CGO_ENABLED: 0
+      run: |
+        LDFLAGS="-s -w -X main.Version=${{ steps.version.outputs.version }} -X main.BuildTime=$(date -u '+%Y-%m-%d_%H:%M:%S')"
+        go build -ldflags="$LDFLAGS" -o ${{ matrix.name }}${{ matrix.ext }} .
+
+    - name: Create config example
+      run: |
+        mkdir -p release
+        cp ${{ matrix.name }}${{ matrix.ext }} release/
+        cp config.toml.example release/config.toml
+        cp README.md release/
+        
+        # Create startup script for different platforms
+        if [ "${{ matrix.goos }}" = "windows" ]; then
+          cat > release/start.bat << 'EOF'
+        @echo off
+        echo Starting YTB2BILI Server...
+        ytb2bili-windows-amd64.exe
+        pause
+        EOF
+        else
+          cat > release/start.sh << 'EOF'
+        #!/bin/bash
+        echo "Starting YTB2BILI Server..."
+        chmod +x ./ytb2bili-*
+        ./ytb2bili-*
+        EOF
+          chmod +x release/start.sh
+        fi
+
+    - name: Create archive
+      run: |
+        cd release
+        if [ "${{ matrix.goos }}" = "windows" ]; then
+          7z a ../${{ matrix.name }}.zip *
+        else
+          tar -czf ../${{ matrix.name }}.tar.gz *
+        fi
+        cd ..
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: ${{ matrix.name }}
+        path: |
+          ${{ matrix.name }}.zip
+          ${{ matrix.name }}.tar.gz
+        retention-days: 30
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v3
+
+    - name: Get version
+      id: version
+      run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+    - name: Generate changelog
+      id: changelog
+      run: |
+        echo "## 🎉 Release ${{ steps.version.outputs.version }}" > CHANGELOG.md
+        echo "" >> CHANGELOG.md
+        echo "### 📦 下载链接" >> CHANGELOG.md
+        echo "" >> CHANGELOG.md
+        echo "| 平台 | 架构 | 下载链接 |" >> CHANGELOG.md
+        echo "|------|------|----------|" >> CHANGELOG.md
+        echo "| Windows | x64 | [ytb2bili-windows-amd64.zip](https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.version }}/ytb2bili-windows-amd64.zip) |" >> CHANGELOG.md
+        echo "| Linux | x64 | [ytb2bili-linux-amd64.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.version }}/ytb2bili-linux-amd64.tar.gz) |" >> CHANGELOG.md
+        echo "| Linux | ARM64 | [ytb2bili-linux-arm64.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.version }}/ytb2bili-linux-arm64.tar.gz) |" >> CHANGELOG.md
+        echo "| macOS | Intel | [ytb2bili-darwin-amd64.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.version }}/ytb2bili-darwin-amd64.tar.gz) |" >> CHANGELOG.md
+        echo "| macOS | Apple Silicon | [ytb2bili-darwin-arm64.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.version }}/ytb2bili-darwin-arm64.tar.gz) |" >> CHANGELOG.md
+        echo "" >> CHANGELOG.md
+        echo "### 🚀 快速开始" >> CHANGELOG.md
+        echo "" >> CHANGELOG.md
+        echo "1. 下载对应平台的压缩包" >> CHANGELOG.md
+        echo "2. 解压到任意目录" >> CHANGELOG.md
+        echo "3. 编辑 \`config.toml\` 配置文件" >> CHANGELOG.md
+        echo "4. 运行 \`start.sh\` (Linux/macOS) 或 \`start.bat\` (Windows)" >> CHANGELOG.md
+        echo "5. 访问 http://localhost:8096" >> CHANGELOG.md
+        echo "" >> CHANGELOG.md
+        echo "### 📋 系统要求" >> CHANGELOG.md
+        echo "" >> CHANGELOG.md
+        echo "- 操作系统: Windows 10+, Linux (Ubuntu 18.04+), macOS 10.15+" >> CHANGELOG.md
+        echo "- 内存: 建议 4GB+ (用于视频处理)" >> CHANGELOG.md
+        echo "- 磁盘: 建议 10GB+ 可用空间 (用于视频存储)" >> CHANGELOG.md
+        echo "- 网络: 稳定的互联网连接" >> CHANGELOG.md
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.version.outputs.version }}
+        name: Release ${{ steps.version.outputs.version }}
+        body_path: CHANGELOG.md
+        draft: false
+        prerelease: false
+        files: |
+          ytb2bili-windows-amd64/ytb2bili-windows-amd64.zip
+          ytb2bili-linux-amd64/ytb2bili-linux-amd64.tar.gz
+          ytb2bili-linux-arm64/ytb2bili-linux-arm64.tar.gz
+          ytb2bili-darwin-amd64/ytb2bili-darwin-amd64.tar.gz
+          ytb2bili-darwin-arm64/ytb2bili-darwin-arm64.tar.gz
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # 可选: 自动构建 Docker 镜像
+  docker:
+    name: Build Docker Image
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Login to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+      if: ${{ secrets.DOCKERHUB_USERNAME != '' }}
+
+    - name: Get version
+      id: version
+      run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: linux/amd64,linux/arm64
+        push: ${{ secrets.DOCKERHUB_USERNAME != '' }}
+        tags: |
+          ${{ secrets.DOCKERHUB_USERNAME }}/ytb2bili:latest
+          ${{ secrets.DOCKERHUB_USERNAME }}/ytb2bili:${{ steps.version.outputs.version }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+      if: ${{ secrets.DOCKERHUB_USERNAME != '' }}

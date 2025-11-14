@@ -895,13 +895,58 @@ go tool pprof http://localhost:8096/debug/pprof/heap
 2. **🐛 提交Issue**: 访问 [GitHub Issues](https://github.com/difyz9/ytb2bili/issues)
 3. **💬 QQ交流群**: 773066052 (技术交流和问题讨论)
 4. **💬 社区讨论**: 加入项目讨论群组
-5. **📧 联系作者**: 
+5. **📧 微信联系**: 扫描下方二维码添加微信
+
+<div align="center">
+<img src="img/751763091471_.pic.jpg" alt="微信联系二维码" width="200"/>
+<br/>
+<em>📱 扫码添加微信 - 技术交流与支持</em>
+</div> 
 
 ---
 
 ## 🚀 生产部署
 
-### 🐳 Docker 部署 (推荐)
+### � 预构建版本下载
+
+> **🎉 自动构建**: 项目已配置 GitHub Actions，每次发布都会自动构建多平台二进制文件
+
+[![Build and Release](https://github.com/difyz9/ytb2bili/actions/workflows/release.yml/badge.svg)](https://github.com/difyz9/ytb2bili/actions/workflows/release.yml)
+
+**📥 快速下载** (免编译，开箱即用):
+
+| 平台 | 架构 | 下载链接 | 说明 |
+|------|------|----------|------|
+| 🪟 **Windows** | x64 | [下载 .zip](https://github.com/difyz9/ytb2bili/releases/latest/download/ytb2bili-windows-amd64.zip) | 包含 `start.bat` 启动脚本 |
+| 🐧 **Linux** | x64 | [下载 .tar.gz](https://github.com/difyz9/ytb2bili/releases/latest/download/ytb2bili-linux-amd64.tar.gz) | 适用于大多数 Linux 发行版 |
+| 🐧 **Linux** | ARM64 | [下载 .tar.gz](https://github.com/difyz9/ytb2bili/releases/latest/download/ytb2bili-linux-arm64.tar.gz) | 适用于树莓派、ARM 服务器 |
+| 🍎 **macOS** | Intel | [下载 .tar.gz](https://github.com/difyz9/ytb2bili/releases/latest/download/ytb2bili-darwin-amd64.tar.gz) | Intel 芯片的 Mac |
+| 🍎 **macOS** | Apple Silicon | [下载 .tar.gz](https://github.com/difyz9/ytb2bili/releases/latest/download/ytb2bili-darwin-arm64.tar.gz) | M1/M2/M3 芯片的 Mac |
+
+**🚀 快速部署步骤**:
+```bash
+# 1. 下载并解压
+wget https://github.com/difyz9/ytb2bili/releases/latest/download/ytb2bili-linux-amd64.tar.gz
+tar -xzf ytb2bili-linux-amd64.tar.gz
+cd ytb2bili-linux-amd64
+
+# 2. 编辑配置
+nano config.toml
+
+# 3. 启动服务
+./start.sh  # Linux/macOS
+# 或双击 start.bat (Windows)
+
+# 4. 访问 Web 界面
+# http://localhost:8096
+```
+
+> **💡 自动更新**: 
+> - 🏷️ **稳定版**: 关注 [Releases](https://github.com/difyz9/ytb2bili/releases) 获取最新稳定版本
+> - 🔄 **自动构建**: 每次代码提交都会触发自动构建和测试
+> - 📊 **构建状态**: 点击上方徽章查看构建状态和历史
+
+### �🐳 Docker 部署 (推荐)
 
 <details>
 <summary><strong>📦 使用 Docker Compose</strong></summary>
@@ -1076,8 +1121,6 @@ scrape_configs:
 [💬 讨论](https://github.com/difyz9/ytb2bili/discussions)
 
 </div>
-
-<img src="img/751763091471_.pic.jpg" alt="微信联系" width="200"/>
 
 
 ---
