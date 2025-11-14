@@ -1053,21 +1053,7 @@ scrape_configs:
 - 说明使用场景和预期效果
 - 参与功能设计讨论
 
-**🔧 代码贡献**:
-```bash
-# Fork 项目并克隆
-git clone https://github.com/your-username/ytb2bili.git
-cd ytb2bili
 
-# 创建功能分支
-git checkout -b feature/your-feature-name
-
-# 提交更改
-git commit -m "feat: add your feature description"
-
-# 推送并创建 Pull Request
-git push origin feature/your-feature-name
-```
 
 ### 📋 开发规范
 
