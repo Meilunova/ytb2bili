@@ -1,16 +1,6 @@
 # 多阶段构建 Dockerfile
-# Stage 1: 构建前端 (如果需要)
-FROM node:18-alpine AS frontend-builder
-WORKDIR /app
-
-# 复制前端项目 (假设在同级目录)
-COPY ../bili-up-web/package*.json ./bili-up-web/ 2>/dev/null || echo "No frontend found"
-RUN if [ -f ./bili-up-web/package.json ]; then \
-      cd bili-up-web && npm ci --only=production && npm run build; \
-    fi
-
-# Stage 2: 构建Go后端
-FROM golang:1.24-alpine AS backend-builder
+# Stage 1: 构建Go后端
+FROM golang:1.21-alpine AS backend-builder
 
 # 安装构建依赖
 RUN apk add --no-cache git ca-certificates tzdata
@@ -24,9 +14,6 @@ RUN go mod download
 # 复制源代码
 COPY . .
 
-# 复制前端构建结果 (如果存在)
-COPY --from=frontend-builder /app/bili-up-web/out ./internal/web/bili-up-web/ 2>/dev/null || echo "No frontend build found"
-
 # 构建Go应用
 ARG VERSION=dev
 ARG BUILD_TIME
@@ -34,7 +21,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     -ldflags="-s -w -X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME}" \
     -o ytb2bili-server .
 
-# Stage 3: 运行阶段
+# Stage 2: 运行阶段
 FROM alpine:latest
 
 # 安装运行时依赖

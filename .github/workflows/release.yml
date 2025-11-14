@@ -53,7 +53,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        go-version: '1.24'
+        go-version: '1.21'
 
     - name: Set up Node.js
       uses: actions/setup-node@v4
@@ -85,14 +85,22 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-node-
 
-    - name: Build frontend (if exists)
+    - name: Check for frontend build
       run: |
-        if [ -d "../bili-up-web" ]; then
-          echo "Building frontend..."
-          make build-web
+        echo "Checking for frontend build support..."
+        if [ -f "Makefile" ] && grep -q "build-web" Makefile; then
+          echo "✅ Found Makefile with build-web target"
+          echo "HAS_FRONTEND=true" >> $GITHUB_ENV
         else
-          echo "Frontend directory not found, skipping frontend build"
+          echo "ℹ️ No frontend build configuration found"
+          echo "HAS_FRONTEND=false" >> $GITHUB_ENV
         fi
+        
+    - name: Build frontend (conditional)
+      if: env.HAS_FRONTEND == 'true'
+      run: |
+        echo "🔨 Building frontend..."
+        make build-web || echo "⚠️ Frontend build failed, continuing without frontend"
 
     - name: Download Go dependencies
       run: go mod download
@@ -214,12 +222,13 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # 可选: 自动构建 Docker 镜像
+  # 可选: 自动构建 Docker 镜像 (需要配置 DOCKERHUB_USERNAME 和 DOCKERHUB_TOKEN secrets)
   docker:
     name: Build Docker Image
     needs: build
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')
+    # 只有在推送标签且配置了Docker Hub secrets时才执行
+    if: github.event_name == 'push' && contains(github.ref, 'refs/tags/') && github.repository_owner == 'difyz9'
     
     steps:
     - name: Checkout code
@@ -228,26 +237,39 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
+    - name: Get version
+      id: version
+      run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
     - name: Login to Docker Hub
       uses: docker/login-action@v3
       with:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
         password: ${{ secrets.DOCKERHUB_TOKEN }}
-      if: ${{ secrets.DOCKERHUB_USERNAME != '' }}
+      continue-on-error: true
+      id: docker-login
 
-    - name: Get version
-      id: version
-      run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-
-    - name: Build and push Docker image
+    - name: Build Docker image (local test)
       uses: docker/build-push-action@v5
       with:
         context: .
+        platforms: linux/amd64
+        push: false
+        tags: |
+          ytb2bili:${{ steps.version.outputs.version }}
+          ytb2bili:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Build and push Docker image to Hub
+      uses: docker/build-push-action@v5
+      if: steps.docker-login.outcome == 'success'
+      with:
+        context: .
         platforms: linux/amd64,linux/arm64
-        push: ${{ secrets.DOCKERHUB_USERNAME != '' }}
+        push: true
         tags: |
           ${{ secrets.DOCKERHUB_USERNAME }}/ytb2bili:latest
           ${{ secrets.DOCKERHUB_USERNAME }}/ytb2bili:${{ steps.version.outputs.version }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
-      if: ${{ secrets.DOCKERHUB_USERNAME != '' }}
