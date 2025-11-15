@@ -1,48 +1,81 @@
 "use client";
 
-import Link from 'next/link';
 import AppLayout from '@/components/layout/AppLayout';
 import QRLogin from '@/components/auth/QRLogin';
 import { useAuth } from '@/hooks/useAuth';
-import { BarChart3, Clock, Download, ExternalLink, Chrome, Settings } from 'lucide-react';
+import { Plus, Youtube, Video, Globe, AlertCircle, CheckCircle } from 'lucide-react';
 import { useState } from 'react';
 
 export default function HomePage() {
   const { user, loading, handleLoginSuccess, handleRefreshStatus, handleLogout } = useAuth();
-  const [isDownloading, setIsDownloading] = useState(false);
+  const [videoUrl, setVideoUrl] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitMessage, setSubmitMessage] = useState('');
+  const [messageType, setMessageType] = useState<'success' | 'error' | ''>('');
 
-  const handleDownloadExtension = async () => {
-    setIsDownloading(true);
+  // 提交视频链接到后端
+  const handleSubmitUrl = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!videoUrl.trim()) {
+      setMessageType('error');
+      setSubmitMessage('请输入视频链接');
+      return;
+    }
+
+    setIsSubmitting(true);
+    setSubmitMessage('');
+    setMessageType('');
+
     try {
-      // 获取最新版本信息
-      const response = await fetch('https://api.github.com/repos/difyz9/bili-up-extension/releases/latest');
-      const release = await response.json();
+      // 获取API基础URL
+      const apiBaseUrl = process.env.NODE_ENV === 'development' 
+        ? '/api/v1'  // 开发模式下使用代理
+        : process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8096/api/v1';
       
-      if (release.assets && release.assets.length > 0) {
-        // 查找.zip文件
-        const zipAsset = release.assets.find((asset: any) => asset.name.endsWith('.zip'));
-        if (zipAsset) {
-          // 创建下载链接
-          const link = document.createElement('a');
-          link.href = zipAsset.browser_download_url;
-          link.download = zipAsset.name;
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-        } else {
-          // 如果没有找到zip文件，打开releases页面
-          window.open('https://github.com/difyz9/bili-up-extension/releases/latest', '_blank');
-        }
+      const response = await fetch(`${apiBaseUrl}/submit`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          url: videoUrl,
+          title: '', // 可以为空，后端会自动提取
+          description: '',
+          operationType: '1', // 默认操作类型
+          subtitles: [],
+          playlistId: '',
+          timestamp: new Date().toISOString(),
+          savedAt: new Date().toISOString(),
+        }),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        setMessageType('success');
+        setSubmitMessage(`视频链接已成功提交！${result.data?.isExisting ? '(更新了现有记录)' : ''}`);
+        setVideoUrl(''); // 清空输入框
       } else {
-        window.open('https://github.com/difyz9/bili-up-extension/releases/latest', '_blank');
+        setMessageType('error');
+        setSubmitMessage(result.message || '提交失败，请重试');
       }
     } catch (error) {
-      console.error('下载失败:', error);
-      // 如果API调用失败，打开releases页面
-      window.open('https://github.com/difyz9/bili-up-extension/releases/latest', '_blank');
+      console.error('提交失败:', error);
+      setMessageType('error');
+      setSubmitMessage('网络错误，请检查后端服务是否正常运行');
     } finally {
-      setIsDownloading(false);
+      setIsSubmitting(false);
     }
+  };
+
+  // 检测视频平台类型
+  const detectPlatform = (url: string) => {
+    if (url.includes('youtube.com') || url.includes('youtu.be')) return 'YouTube';
+    if (url.includes('bilibili.com')) return 'Bilibili';
+    if (url.includes('twitter.com') || url.includes('x.com')) return 'Twitter/X';
+    if (url.includes('tiktok.com')) return 'TikTok';
+    if (url.includes('instagram.com')) return 'Instagram';
+    return '未知平台';
   };
 
   if (loading) {
@@ -66,7 +99,7 @@ export default function HomePage() {
                 Bili-Up Web
               </h1>
               <p className="text-gray-600">
-                Bilibili 视频管理平台
+                多平台视频下载与管理平台
               </p>
             </div>
             
@@ -84,99 +117,143 @@ export default function HomePage() {
 
   return (
     <AppLayout user={user} onLogout={handleLogout}>
-      <div className="space-y-6">
-        {/* 插件下载导引 */}
-        <div className="bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg border border-purple-200 p-6">
-          <div className="flex items-start space-x-4">
-            <div className="flex-shrink-0">
-              <Chrome className="w-8 h-8 text-purple-600" />
-            </div>
-            <div className="flex-1">
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                安装浏览器插件获取视频信息
-              </h3>
-              <p className="text-gray-600 mb-4">
-                为了获取 B 站视频信息和更好的使用体验，建议安装我们的浏览器插件。插件可以帮助您：
-              </p>
-              <ul className="text-sm text-gray-600 mb-4 space-y-1">
-                <li>• 自动获取视频标题、描述和封面</li>
-                <li>• 快速导入视频链接到上传队列</li>
-                <li>• 同步浏览器中的视频收藏</li>
-              </ul>
-              <div className="flex flex-col sm:flex-row gap-3">
-                <button
-                  onClick={handleDownloadExtension}
-                  disabled={isDownloading}
-                  className="flex items-center justify-center px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  {isDownloading ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
-                      下载中...
-                    </>
-                  ) : (
-                    <>
-                      <Download className="w-4 h-4 mr-2" />
-                      下载最新插件
-                    </>
-                  )}
-                </button>
-                <a
-                  href="https://github.com/difyz9/bili-up-extension"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-center px-4 py-2 border border-purple-300 text-purple-700 rounded-md hover:bg-purple-50 transition-colors"
-                >
-                  <ExternalLink className="w-4 h-4 mr-2" />
-                  查看源码
-                </a>
-              </div>
-              <div className="mt-3 text-xs text-gray-500">
-                下载后请解压文件，然后在浏览器扩展管理页面选择&ldquo;加载已解压的扩展程序&rdquo;
-              </div>
-            </div>
+      <div className="max-w-4xl mx-auto space-y-6">
+        {/* 主要功能区域 - 视频链接提交 */}
+        <div className="bg-white rounded-lg shadow-md p-8">
+          <div className="text-center mb-8">
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">
+              多平台视频下载
+            </h1>
+            <p className="text-gray-600">
+              支持 YouTube、Bilibili、Twitter、TikTok 等多个平台的视频下载
+            </p>
           </div>
+
+          {/* 视频链接输入表单 */}
+          <form onSubmit={handleSubmitUrl} className="space-y-6">
+            <div>
+              <label htmlFor="video-url" className="block text-sm font-medium text-gray-700 mb-2">
+                视频链接
+              </label>
+              <div className="relative">
+                <input
+                  id="video-url"
+                  type="url"
+                  value={videoUrl}
+                  onChange={(e) => setVideoUrl(e.target.value)}
+                  placeholder="请输入视频链接，如：https://www.youtube.com/watch?v=..."
+                  className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+                  disabled={isSubmitting}
+                />
+                <div className="absolute inset-y-0 right-0 flex items-center pr-3">
+                  {videoUrl.trim() && (
+                    <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
+                      {detectPlatform(videoUrl)}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={isSubmitting || !videoUrl.trim()}
+              className="w-full flex items-center justify-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors font-medium"
+            >
+              {isSubmitting ? (
+                <>
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
+                  提交中...
+                </>
+              ) : (
+                <>
+                  <Plus className="w-5 h-5 mr-2" />
+                  提交下载
+                </>
+              )}
+            </button>
+          </form>
+
+          {/* 提交结果消息 */}
+          {submitMessage && (
+            <div className={`mt-4 p-4 rounded-lg flex items-center ${
+              messageType === 'success' 
+                ? 'bg-green-50 border border-green-200 text-green-800'
+                : 'bg-red-50 border border-red-200 text-red-800'
+            }`}>
+              {messageType === 'success' ? (
+                <CheckCircle className="w-5 h-5 mr-2 text-green-600" />
+              ) : (
+                <AlertCircle className="w-5 h-5 mr-2 text-red-600" />
+              )}
+              {submitMessage}
+            </div>
+          )}
         </div>
 
-        {/* 主要功能区域 */}
-        <div className="bg-white rounded-lg shadow-md p-8">
-          <div className="text-center">
-            <h2 className="text-2xl font-semibold text-gray-900 mb-4">
-              欢迎使用 Bili-Up Web
-            </h2>
-            <p className="text-gray-600 mb-6">
-              请选择左侧导航菜单来访问不同功能模块
-            </p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-lg mx-auto">
-              <Link
-                href="/dashboard"
-                className="flex items-center justify-center px-4 py-3 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors"
-              >
-                <BarChart3 className="w-5 h-5 mr-2" />
-                任务队列
-              </Link>
-              <Link
-                href="/schedule"
-                className="flex items-center justify-center px-4 py-3 bg-green-50 text-green-700 rounded-lg hover:bg-green-100 transition-colors"
-              >
-                <Clock className="w-5 h-5 mr-2" />
-                定时上传
-              </Link>
-              <Link
-                href="/extension"
-                className="flex items-center justify-center px-4 py-3 bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100 transition-colors"
-              >
-                <Chrome className="w-5 h-5 mr-2" />
-                浏览器插件
-              </Link>
-              <Link
-                href="/settings"
-                className="flex items-center justify-center px-4 py-3 bg-gray-50 text-gray-700 rounded-lg hover:bg-gray-100 transition-colors"
-              >
-                <Settings className="w-5 h-5 mr-2" />
-                设置
-              </Link>
+        {/* 支持的平台说明 */}
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200 p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+            <Globe className="w-5 h-5 mr-2 text-blue-600" />
+            支持的视频平台
+          </h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="flex items-center space-x-2">
+              <Youtube className="w-5 h-5 text-red-600" />
+              <span className="text-sm text-gray-700">YouTube</span>
             </div>
+            <div className="flex items-center space-x-2">
+              <Video className="w-5 h-5 text-blue-600" />
+              <span className="text-sm text-gray-700">Bilibili</span>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Globe className="w-5 h-5 text-blue-400" />
+              <span className="text-sm text-gray-700">Twitter/X</span>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Video className="w-5 h-5 text-purple-600" />
+              <span className="text-sm text-gray-700">TikTok</span>
+            </div>
+          </div>
+          <p className="mt-4 text-sm text-gray-600">
+            基于 yt-dlp 技术，支持超过 1000+ 个视频网站的下载。提交后系统将自动识别平台并开始下载处理。
+          </p>
+        </div>
+
+        {/* 快捷导航 */}
+        <div className="bg-white rounded-lg shadow-md p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">
+            管理功能
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <a
+              href="/dashboard"
+              className="flex items-center justify-center px-4 py-3 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors"
+            >
+              <Video className="w-5 h-5 mr-2" />
+              任务队列
+            </a>
+            <a
+              href="/schedule"
+              className="flex items-center justify-center px-4 py-3 bg-green-50 text-green-700 rounded-lg hover:bg-green-100 transition-colors"
+            >
+              <Plus className="w-5 h-5 mr-2" />
+              定时上传
+            </a>
+            <a
+              href="/extension"
+              className="flex items-center justify-center px-4 py-3 bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100 transition-colors"
+            >
+              <Globe className="w-5 h-5 mr-2" />
+              浏览器插件
+            </a>
+            <a
+              href="/settings"
+              className="flex items-center justify-center px-4 py-3 bg-gray-50 text-gray-700 rounded-lg hover:bg-gray-100 transition-colors"
+            >
+              <Video className="w-5 h-5 mr-2" />
+              设置
+            </a>
           </div>
         </div>
       </div>
