@@ -17,7 +17,7 @@ node_modules
 # 系统文件
 .DS_Store
 Thumbs.db
-
+*.toml
 # 日志文件
 logs/
 *.log

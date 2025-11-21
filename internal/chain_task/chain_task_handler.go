@@ -309,7 +309,9 @@ func (h *ChainTaskHandler) RunSingleTaskStep(videoID, stepName string) error {
 	}
 
 	// 添加任务到链
-	chain.AddTask(task)
+	if task != nil {
+		chain.AddTask(task)
+	}
 
 	h.App.Logger.Infof("开始执行单个任务步骤: %s (VideoID: %s)", stepName, videoID)
 

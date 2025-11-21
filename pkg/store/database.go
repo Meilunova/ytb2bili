@@ -43,8 +43,10 @@ func NewDatabase(config *types.AppConfig) (*gorm.DB, error) {
 			return nil, fmt.Errorf("failed to connect to PostgreSQL: %w", err)
 		}
 	case "mysql":
+
 		dsn := config.Database.GetDSN()
 		db, err = gorm.Open(mysql.Open(dsn), gormConfig)
+
 		if err != nil {
 			return nil, fmt.Errorf("failed to connect to MySQL: %w", err)
 		}
