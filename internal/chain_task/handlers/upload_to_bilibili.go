@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/difyz9/bilibili-go-sdk/bilibili"
@@ -283,28 +284,49 @@ func (t *UploadToBilibili) buildStudioInfo(video *bilibili.Video, context map[st
 			}
 		}
 
+		// 清理标题中的标签（#hashtag）
+		cleanTitle := func(title string) string {
+			// 使用正则表达式移除 #标签
+			re := regexp.MustCompile(`\s*#[^\s#]+`)
+			cleaned := re.ReplaceAllString(title, "")
+			// 清理多余的空格
+			cleaned = strings.TrimSpace(cleaned)
+			// 将多个连续空格替换为单个空格
+			re2 := regexp.MustCompile(`\s+`)
+			cleaned = re2.ReplaceAllString(cleaned, " ")
+			return cleaned
+		}
+
 		// 根据配置选择标题来源
 		biliConfig := t.App.Config.BilibiliConfig
-		if biliConfig != nil && !biliConfig.UseOriginalTitle {
+		if biliConfig != nil && biliConfig.CustomTitleTemplate != "" {
+			// 使用自定义标题模板
+			title = biliConfig.CustomTitleTemplate
+			// 清理原标题中的标签
+			cleanedOriginalTitle := cleanTitle(savedVideo.Title)
+			title = strings.ReplaceAll(title, "{original_title}", cleanedOriginalTitle)
+			title = strings.ReplaceAll(title, "{ai_title}", savedVideo.GeneratedTitle)
+			t.App.Logger.Infof("✓ 使用自定义标题模板: %s", title)
+		} else if biliConfig != nil && !biliConfig.UseOriginalTitle {
 			// 配置为使用AI生成标题
 			if savedVideo.GeneratedTitle != "" {
 				title = savedVideo.GeneratedTitle
 				t.App.Logger.Infof("✓ 使用AI生成的标题: %s", title)
 			} else if savedVideo.Title != "" {
-				title = savedVideo.Title
-				t.App.Logger.Infof("✓ AI标题不存在，回退使用原始标题: %s", title)
+				title = cleanTitle(savedVideo.Title)
+				t.App.Logger.Infof("✓ AI标题不存在，回退使用原始标题（已清理标签）: %s", title)
 			}
 		} else {
 			// 默认使用原始标题（YouTube原标题）
 			if savedVideo.Title != "" {
-				title = savedVideo.Title
-				t.App.Logger.Infof("✓ 使用YouTube原始标题: %s", title)
+				title = cleanTitle(savedVideo.Title)
+				t.App.Logger.Infof("✓ 使用YouTube原始标题（已清理标签）: %s", title)
 			} else if savedVideo.GeneratedTitle != "" {
 				title = savedVideo.GeneratedTitle
 				t.App.Logger.Infof("✓ 原始标题不存在，回退使用AI标题: %s", title)
 			}
 		}
-		
+
 		// B站标题长度限制（80个字符）
 		const maxTitleLength = 80
 		titleRunes := []rune(title)
@@ -333,7 +355,7 @@ func (t *UploadToBilibili) buildStudioInfo(video *bilibili.Video, context map[st
 			}
 			return true
 		}
-		
+
 		// 根据配置选择描述来源
 		if biliConfig != nil && biliConfig.CustomDescTemplate != "" {
 			// 使用自定义模板
@@ -354,13 +376,32 @@ func (t *UploadToBilibili) buildStudioInfo(video *bilibili.Video, context map[st
 				t.App.Logger.Info("✓ 无有效描述，仅使用原视频链接")
 			}
 		} else {
-			// 默认使用AI生成的描述
+			// 默认使用AI生成的描述 + 原视频简介
+			aiIntro := ""
+			originalDesc := ""
+
+			// 获取AI生成的精炼介绍（100字以内）
 			if savedVideo.GeneratedDesc != "" {
-				desc = savedVideo.GeneratedDesc
-				t.App.Logger.Infof("✓ 使用AI生成的描述")
-			} else if isValidDescription(savedVideo.Description) {
-				desc = savedVideo.Description
-				t.App.Logger.Infof("✓ AI描述不存在，回退使用原始描述")
+				aiIntro = savedVideo.GeneratedDesc
+				t.App.Logger.Infof("✓ AI生成的精炼介绍: %s", aiIntro)
+			}
+
+			// 获取原视频简介
+			if isValidDescription(savedVideo.Description) {
+				originalDesc = savedVideo.Description
+				t.App.Logger.Infof("✓ 原视频简介长度: %d 字符", len([]rune(originalDesc)))
+			}
+
+			// 拼接描述：AI介绍 + 分隔线 + 原视频简介
+			if aiIntro != "" && originalDesc != "" {
+				desc = fmt.Sprintf("%s\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📄 原视频简介：\n%s", aiIntro, originalDesc)
+				t.App.Logger.Info("✓ 使用AI介绍 + 原视频简介")
+			} else if aiIntro != "" {
+				desc = aiIntro
+				t.App.Logger.Info("✓ 仅使用AI介绍")
+			} else if originalDesc != "" {
+				desc = originalDesc
+				t.App.Logger.Info("✓ 仅使用原视频简介")
 			} else {
 				desc = ""
 				t.App.Logger.Info("✓ 无有效描述，仅使用原视频链接")
@@ -372,31 +413,31 @@ func (t *UploadToBilibili) buildStudioInfo(video *bilibili.Video, context map[st
 			tags = savedVideo.GeneratedTags
 			t.App.Logger.Infof("✓ 使用数据库中AI生成的标签: %s", tags)
 		}
-		
+
 		// B站简介字数限制（2000字）
 		const maxDescLength = 2000
-		
+
 		// 在描述末尾添加原视频链接
 		linkSuffix := ""
 		if savedVideo.URL != "" {
 			linkSuffix = fmt.Sprintf("\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📺 原视频链接：%s\n🔄 本视频为转载内容，仅供学习交流使用", savedVideo.URL)
 		}
-		
+
 		// 计算链接后缀的长度（字符数）
 		linkSuffixLength := len([]rune(linkSuffix))
 		t.App.Logger.Infof("🔗 原视频链接后缀长度: %d 字符", linkSuffixLength)
-		
+
 		// 预先截断描述，确保有足够空间给链接
 		descRunes := []rune(desc)
 		originalDescLength := len(descRunes)
 		t.App.Logger.Infof("📄 原始描述长度: %d 字符", originalDescLength)
-		
+
 		// 计算可用的描述长度（留20个字符的安全缓冲）
 		maxAllowedDescLength := maxDescLength - linkSuffixLength - 20
 		if maxAllowedDescLength < 0 {
 			maxAllowedDescLength = 0
 		}
-		
+
 		// 如果描述超过可用长度，截断它
 		if len(descRunes) > maxAllowedDescLength {
 			if maxAllowedDescLength > 3 {
@@ -407,17 +448,17 @@ func (t *UploadToBilibili) buildStudioInfo(video *bilibili.Video, context map[st
 				t.App.Logger.Warn("⚠️ 空间不足，已清空描述内容，仅保留原视频链接")
 			}
 		}
-		
+
 		// 添加链接后缀
 		if linkSuffix != "" {
 			desc += linkSuffix
 			t.App.Logger.Infof("✓ 已添加原视频链接到描述")
 		}
-		
+
 		// 最终检查长度
 		finalDescLength := len([]rune(desc))
 		t.App.Logger.Infof("📝 最终描述长度: %d/%d 字符", finalDescLength, maxDescLength)
-		
+
 		// 最后的安全检查，如果还是超长，强制截断
 		if finalDescLength > maxDescLength {
 			desc = string([]rune(desc)[:maxDescLength])
@@ -460,6 +501,13 @@ func (t *UploadToBilibili) buildStudioInfo(video *bilibili.Video, context map[st
 	copyright := 1 // 默认自制
 	noReprint := 1 // 默认禁止转载
 	source := ""
+	tid := 122                   // 默认分区
+	dynamic := "发布了新视频！"         // 默认动态
+	openElec := 0                // 默认关闭充电
+	selectionReserve := int64(0) // 默认不参与活动
+	upSelectionReply := 0        // 默认不展示推荐评论
+	upCloseReply := 0            // 默认开启评论
+	upCloseReward := 0           // 默认开启打赏
 
 	if t.App.Config.BilibiliConfig != nil {
 		if t.App.Config.BilibiliConfig.Copyright > 0 {
@@ -467,6 +515,19 @@ func (t *UploadToBilibili) buildStudioInfo(video *bilibili.Video, context map[st
 		}
 		noReprint = t.App.Config.BilibiliConfig.NoReprint
 		source = t.App.Config.BilibiliConfig.Source
+
+		// 读取新增配置
+		if t.App.Config.BilibiliConfig.Tid > 0 {
+			tid = t.App.Config.BilibiliConfig.Tid
+		}
+		if t.App.Config.BilibiliConfig.Dynamic != "" {
+			dynamic = t.App.Config.BilibiliConfig.Dynamic
+		}
+		openElec = t.App.Config.BilibiliConfig.OpenElec
+		selectionReserve = t.App.Config.BilibiliConfig.SelectionReserve
+		upSelectionReply = t.App.Config.BilibiliConfig.UpSelectionReply
+		upCloseReply = t.App.Config.BilibiliConfig.UpCloseReply
+		upCloseReward = t.App.Config.BilibiliConfig.UpCloseReward
 	}
 
 	// 如果是转载且没有提供来源，使用视频URL作为来源
@@ -484,19 +545,33 @@ func (t *UploadToBilibili) buildStudioInfo(video *bilibili.Video, context map[st
 		Title:         t.truncateTitle(title, 80), // B站标题最长80字符
 		Desc:          desc,
 		Tag:           tags,
-		Tid:           122,      // 138=搞笑，可以根据需要修改
+		Tid:           tid,
 		Cover:         coverURL, // 使用上传的封面URL
-		Dynamic:       "发布了新视频！",
+		Dynamic:       dynamic,
 		OpenSubtitle:  hasZhSubtitle, // 如果有中文字幕则开启
 		Interactive:   0,
 		Dolby:         0,
 		LosslessMusic: 0,
 		NoReprint:     noReprint,
-		OpenElec:      0,
+		OpenElec:      openElec,
 		Videos: []bilibili.Video{
 			*video,
 		},
 		Source: source,
+	}
+
+	// 记录暂不支持的高级配置（需要SDK更新）
+	if selectionReserve > 0 {
+		t.App.Logger.Warnf("⚠️ 参与活动功能(selection_reserve=%d)暂不被SDK支持，已忽略", selectionReserve)
+	}
+	if upSelectionReply > 0 {
+		t.App.Logger.Warnf("⚠️ 推荐评论功能(up_selection_reply=%d)暂不被SDK支持，已忽略", upSelectionReply)
+	}
+	if upCloseReply > 0 {
+		t.App.Logger.Warnf("⚠️ 关闭评论功能(up_close_reply=%d)暂不被SDK支持，已忽略", upCloseReply)
+	}
+	if upCloseReward > 0 {
+		t.App.Logger.Warnf("⚠️ 关闭打赏功能(up_close_reward=%d)暂不被SDK支持，已忽略", upCloseReward)
 	}
 
 	t.App.Logger.Infof("📋 投稿信息:")

@@ -39,6 +39,16 @@ yt_dlp_path = ""
   timeout = 60
   max_tokens = 4000
 
+[GeminiConfig]
+  enabled = false                  # 是否启用Gemini服务
+  api_key = ""                     # Google AI API密钥（从 https://aistudio.google.com/app/apikey 获取）
+  model = "gemini-2.5-flash"       # 使用的模型（gemini-2.5-flash 快速, gemini-2.5-pro 强大）
+  timeout = 120                    # 超时时间（秒）
+  max_tokens = 8000                # 最大输出token数
+  use_for_metadata = false         # 是否使用Gemini生成元数据（优先于DeepSeek）
+  analyze_video = true             # 是否分析视频文件（true=多模态分析，false=仅文本）
+  video_sample_frames = 0          # 视频采样帧数（0=上传完整视频）
+
 [ProxyConfig]
   use_proxy = false
   proxy_host = "http://127.0.0.1:7890"
@@ -55,9 +65,20 @@ yt_dlp_path = ""
   copyright = 2                # 1=自制, 2=转载
   source = "YouTube"           # 转载来源
   no_reprint = 1               # 0=允许转载, 1=禁止转载
-  use_original_title = true    # true=使用原视频标题（推荐）, false=使用AI生成标题
-  use_original_desc = false    # true=使用原视频描述, false=使用AI生成描述（推荐）
-  custom_desc_template = ""    # 自定义描述模板（可选），支持变量: {original_desc}, {ai_desc}
+  use_original_title = true     # true=使用原视频标题, false=使用AI生成标题
+  use_original_desc = false     # true=使用原视频描述, false=使用AI生成描述
+  custom_title_template = ""    # 自定义标题模板（可选），支持变量: {original_title}, {ai_title}
+                                # 示例: "{original_title}【中文字幕】" 或 "【原神MMD】{ai_title}"
+  custom_desc_template = ""     # 自定义描述模板（可选），支持变量: {original_desc}, {ai_desc}
+  
+  # 新增配置项
+  tid = 122                    # 分区ID（122=日常，138=搞笑，详见B站分区列表）
+  dynamic = "发布了新视频！"      # 动态文本
+  open_elec = 0                # 是否开启充电面板 0=关闭, 1=开启
+  selection_reserve = 0        # 参与活动ID（0表示不参与，暂不被SDK支持）
+  up_selection_reply = 0       # 是否展示推荐评论 0=关闭, 1=开启（暂不被SDK支持）
+  up_close_reply = 0           # 是否关闭评论 0=开启评论, 1=关闭评论（暂不被SDK支持）
+  up_close_reward = 0          # 是否关闭打赏 0=开启, 1=关闭（暂不被SDK支持）
 
   # 自定义描述模板示例：
   # custom_desc_template = """

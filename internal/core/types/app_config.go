@@ -23,6 +23,7 @@ type AppConfig struct {
 	TenCosConfig        *TencentCosConfig    `toml:"TenCosConfig"`        // 腾讯云 COS 存储配置
 	BaiduTransConfig    *BaiduTransConfig    `toml:"BaiduTransConfig"`    // 百度翻译服务配置
 	DeepSeekTransConfig *DeepSeekTransConfig `toml:"DeepSeekTransConfig"` // DeepSeek翻译服务配置
+	GeminiConfig        *GeminiConfig        `toml:"GeminiConfig"`        // Gemini多模态服务配置
 	TranslatorConfig    *TranslatorConfig    `toml:"TranslatorConfig"`    // 翻译器总配置
 	ProxyConfig         *ProxyConfig         `toml:"ProxyConfig"`         // 代理配置
 	AnalyticsConfig     *AnalyticsConfig     `toml:"AnalyticsConfig"`     // 数据分析配置
@@ -31,12 +32,22 @@ type AppConfig struct {
 
 // BilibiliConfig Bilibili上传配置
 type BilibiliConfig struct {
-	Copyright          int    `toml:"copyright"`            // 1=自制, 2=转载
-	Source             string `toml:"source"`               // 转载来源（当 Copyright=2 时必填）
-	NoReprint          int    `toml:"no_reprint"`           // 0=允许转载, 1=禁止转载
-	UseOriginalTitle   bool   `toml:"use_original_title"`   // true=使用原视频标题, false=使用AI生成标题
-	UseOriginalDesc    bool   `toml:"use_original_desc"`    // true=使用原视频描述, false=使用AI生成描述
-	CustomDescTemplate string `toml:"custom_desc_template"` // 自定义描述模板，支持变量: {original_desc}, {ai_desc}
+	Copyright           int    `toml:"copyright"`             // 1=自制, 2=转载
+	Source              string `toml:"source"`                // 转载来源（当 Copyright=2 时必填）
+	NoReprint           int    `toml:"no_reprint"`            // 0=允许转载, 1=禁止转载
+	UseOriginalTitle    bool   `toml:"use_original_title"`    // true=使用原视频标题, false=使用AI生成标题
+	UseOriginalDesc     bool   `toml:"use_original_desc"`     // true=使用原视频描述, false=使用AI生成描述
+	CustomTitleTemplate string `toml:"custom_title_template"` // 自定义标题模板，支持变量: {original_title}, {ai_title}
+	CustomDescTemplate  string `toml:"custom_desc_template"`  // 自定义描述模板，支持变量: {original_desc}, {ai_desc}
+
+	// 新增配置项
+	Tid              int    `toml:"tid"`                // 分区ID（默认122，可自定义）
+	Dynamic          string `toml:"dynamic"`            // 动态文本（默认"发布了新视频！"）
+	OpenElec         int    `toml:"open_elec"`          // 是否开启充电面板 0=关闭, 1=开启
+	SelectionReserve int64  `toml:"selection_reserve"`  // 参与活动ID（0表示不参与）
+	UpSelectionReply int    `toml:"up_selection_reply"` // 是否展示推荐评论 0=关闭, 1=开启
+	UpCloseReply     int    `toml:"up_close_reply"`     // 是否关闭评论 0=开启评论, 1=关闭评论
+	UpCloseReward    int    `toml:"up_close_reward"`    // 是否关闭打赏 0=开启, 1=关闭
 }
 
 type TencentCosConfig struct {
@@ -122,6 +133,18 @@ type DeepSeekTransConfig struct {
 	MaxTokens int    `toml:"max_tokens"` // 最大token数
 }
 
+// GeminiConfig Gemini多模态服务配置
+type GeminiConfig struct {
+	Enabled           bool   `toml:"enabled"`             // 是否启用Gemini服务
+	ApiKey            string `toml:"api_key"`             // Google AI API密钥
+	Model             string `toml:"model"`               // 使用的模型，默认为 gemini-1.5-pro
+	Timeout           int    `toml:"timeout"`             // 超时时间（秒）
+	MaxTokens         int    `toml:"max_tokens"`          // 最大输出token数
+	UseForMetadata    bool   `toml:"use_for_metadata"`    // 是否使用Gemini生成元数据（优先于DeepSeek）
+	AnalyzeVideo      bool   `toml:"analyze_video"`       // 是否分析视频文件（true=多模态，false=仅文本）
+	VideoSampleFrames int    `toml:"video_sample_frames"` // 视频采样帧数（0=上传完整视频）
+}
+
 // TranslatorConfig 翻译器总配置
 type TranslatorConfig struct {
 	DefaultProvider   string   `toml:"default_provider"`   // 默认翻译提供商
@@ -193,6 +216,18 @@ func NewDefaultConfig() *AppConfig {
 			MaxTokens: 4000,
 		},
 
+		// Gemini 多模态配置（默认值，可被 config.toml 覆盖）
+		GeminiConfig: &GeminiConfig{
+			Enabled:           false,
+			ApiKey:            "",
+			Model:             "gemini-2.5-flash",
+			Timeout:           120,
+			MaxTokens:         8000,
+			UseForMetadata:    false, // 默认不启用，优先使用DeepSeek
+			AnalyzeVideo:      true,  // 默认启用视频分析
+			VideoSampleFrames: 0,     // 默认上传完整视频
+		},
+
 		// 代理配置（默认值，可被 config.toml 覆盖）
 		ProxyConfig: &ProxyConfig{
 			UseProxy:  false,
@@ -212,10 +247,17 @@ func NewDefaultConfig() *AppConfig {
 		BilibiliConfig: &BilibiliConfig{
 			Copyright:          1, // 默认自制
 			Source:             "",
-			NoReprint:          1,     // 默认禁止转载
-			UseOriginalTitle:   true,  // 默认使用原视频标题
-			UseOriginalDesc:    false, // 默认使用AI生成的描述
-			CustomDescTemplate: "",    // 默认不使用自定义模板
+			NoReprint:          1,         // 默认禁止转载
+			UseOriginalTitle:   true,      // 默认使用原视频标题
+			UseOriginalDesc:    false,     // 默认使用AI生成的描述
+			CustomDescTemplate: "",        // 默认不使用自定义模板
+			Tid:                122,       // 默认分区：日常
+			Dynamic:            "发布了新视频！", // 默认动态
+			OpenElec:           0,         // 默认关闭充电
+			SelectionReserve:   0,         // 默认不参与活动
+			UpSelectionReply:   0,         // 默认不展示推荐评论
+			UpCloseReply:       0,         // 默认开启评论
+			UpCloseReward:      0,         // 默认开启打赏
 		},
 	}
 }
@@ -244,6 +286,7 @@ func LoadConfig(configFile string) (*AppConfig, error) {
 		YtDlpPath           string               `toml:"yt_dlp_path"`
 		TenCosConfig        *TencentCosConfig    `toml:"TenCosConfig"`
 		DeepSeekTransConfig *DeepSeekTransConfig `toml:"DeepSeekTransConfig"`
+		GeminiConfig        *GeminiConfig        `toml:"GeminiConfig"`
 		ProxyConfig         *ProxyConfig         `toml:"ProxyConfig"`
 		AnalyticsConfig     *AnalyticsConfig     `toml:"AnalyticsConfig"`
 		BilibiliConfig      *BilibiliConfig      `toml:"BilibiliConfig"`
@@ -268,6 +311,9 @@ func LoadConfig(configFile string) (*AppConfig, error) {
 	}
 	if fileConfig.DeepSeekTransConfig != nil {
 		config.DeepSeekTransConfig = fileConfig.DeepSeekTransConfig
+	}
+	if fileConfig.GeminiConfig != nil {
+		config.GeminiConfig = fileConfig.GeminiConfig
 	}
 	if fileConfig.ProxyConfig != nil {
 		config.ProxyConfig = fileConfig.ProxyConfig
@@ -295,6 +341,7 @@ func SaveConfig(config *AppConfig) error {
 		YtDlpPath           string               `toml:"yt_dlp_path"`
 		TenCosConfig        *TencentCosConfig    `toml:"TenCosConfig"`
 		DeepSeekTransConfig *DeepSeekTransConfig `toml:"DeepSeekTransConfig"`
+		GeminiConfig        *GeminiConfig        `toml:"GeminiConfig"`
 		ProxyConfig         *ProxyConfig         `toml:"ProxyConfig"`
 		AnalyticsConfig     *AnalyticsConfig     `toml:"AnalyticsConfig"`
 		BilibiliConfig      *BilibiliConfig      `toml:"BilibiliConfig"`
@@ -308,6 +355,7 @@ func SaveConfig(config *AppConfig) error {
 		YtDlpPath:           config.YtDlpPath,
 		TenCosConfig:        config.TenCosConfig,
 		DeepSeekTransConfig: config.DeepSeekTransConfig,
+		GeminiConfig:        config.GeminiConfig,
 		ProxyConfig:         config.ProxyConfig,
 		AnalyticsConfig:     config.AnalyticsConfig,
 		BilibiliConfig:      config.BilibiliConfig,
