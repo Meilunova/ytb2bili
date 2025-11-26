@@ -41,13 +41,16 @@ yt_dlp_path = ""
 
 [GeminiConfig]
   enabled = false                  # 是否启用Gemini服务
-  api_key = ""                     # Google AI API密钥（从 https://aistudio.google.com/app/apikey 获取）
-  model = "gemini-2.5-flash"       # 使用的模型（gemini-2.5-flash 快速, gemini-2.5-pro 强大）
+  api_key = ""                     # Google AI API密钥（单个，兼容旧配置）
+  api_keys = []                    # 多个API密钥，用于轮询（优先使用，格式：["key1", "key2", "key3"]）
+  model = "gemini-2.0-flash"       # 使用的模型（gemini-2.0-flash 快速, gemini-2.5-pro 强大）
   timeout = 120                    # 超时时间（秒）
   max_tokens = 8000                # 最大输出token数
-  use_for_metadata = false         # 是否使用Gemini生成元数据（优先于DeepSeek）
+  use_for_metadata = true          # 是否使用Gemini生成元数据（元数据生成必须使用Gemini）
   analyze_video = true             # 是否分析视频文件（true=多模态分析，false=仅文本）
   video_sample_frames = 0          # 视频采样帧数（0=上传完整视频）
+  # 注意：Gemini原生API必须使用Google官方地址，不支持自定义代理（文件上传功能需要）
+  # 如需代理访问，请使用翻译服务配置中的Gemini提供商（通过OpenAI兼容API）
 
 [ProxyConfig]
   use_proxy = false

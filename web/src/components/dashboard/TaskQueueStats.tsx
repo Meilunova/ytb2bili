@@ -1,12 +1,13 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { RefreshCw, Clock, Play, CheckCircle, Upload, AlertCircle } from 'lucide-react';
+import { RefreshCw, Clock, Play, CheckCircle, Upload, AlertCircle, Trash2, RotateCcw, ExternalLink } from 'lucide-react';
 
 interface Video {
   id: number;
   video_id: string;
   title: string;
+  url?: string;
   status: string;
   created_at: string;
   updated_at: string;
@@ -104,6 +105,58 @@ export default function TaskQueueStats({ onVideoSelect }: TaskQueueStatsProps) {
       }
     } catch (error) {
       console.error('Error retrying step:', error);
+    }
+  };
+
+  const handleResetAllFailed = async (videoId: number) => {
+    try {
+      const response = await fetch(`/api/v1/videos/${videoId}/steps/reset-failed`, {
+        method: 'POST',
+      });
+      const data = await response.json();
+      if (data.code === 200 || data.code === 0) {
+        const resetCount = data.data?.reset_count || 0;
+        if (resetCount > 0) {
+          alert(`已重置 ${resetCount} 个失败步骤，任务将自动重新执行`);
+        } else {
+          alert('没有需要重置的失败步骤');
+        }
+        // 刷新详情和列表
+        handleToggleDetails(videoId);
+        fetchVideos();
+      } else {
+        alert(`重置失败：${data.message}`);
+      }
+    } catch (error) {
+      console.error('Error resetting failed steps:', error);
+      alert('网络错误，重置失败');
+    }
+  };
+
+  const handleDeleteVideo = async (videoId: string, videoTitle: string, e: React.MouseEvent) => {
+    e.stopPropagation(); // 阻止事件冒泡，避免触发详情展开
+    
+    if (!confirm(`确定要删除视频 "${videoTitle || videoId}" 吗？\n\n此操作将删除：\n- 所有任务步骤\n- 视频文件和字幕文件\n- 数据库记录\n\n此操作无法恢复！`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/v1/videos/${videoId}`, {
+        method: 'DELETE',
+      });
+
+      const data = await response.json();
+
+      if (data.code === 200) {
+        alert('✅ 删除成功！');
+        // 刷新列表
+        fetchVideos();
+      } else {
+        alert(`❌ 删除失败：${data.message}`);
+      }
+    } catch (error) {
+      console.error('删除视频失败:', error);
+      alert('❌ 网络错误，删除失败');
     }
   };
   
@@ -293,15 +346,37 @@ export default function TaskQueueStats({ onVideoSelect }: TaskQueueStatsProps) {
                           </p>
                           <div className="flex items-center space-x-6 text-xs text-gray-500">
                             <span>视频ID: {video.video_id}</span>
+                            {video.url && (
+                              <a
+                                href={video.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center text-blue-600 hover:text-blue-800 hover:underline"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <ExternalLink className="w-3 h-3 mr-1" />
+                                原视频
+                              </a>
+                            )}
                             <span>创建: {new Date(video.created_at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
                             <span>更新: {new Date(video.updated_at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
                           </div>
                         </div>
-                        <button 
-                          className="ml-4 px-4 py-2 text-sm text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                        >
-                          {expandedVideoId === video.id ? '收起详情' : '查看详情'}
-                        </button>
+                        <div className="ml-4 flex items-center space-x-2">
+                          <button 
+                            onClick={(e) => handleDeleteVideo(video.video_id, video.title, e)}
+                            className="px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded transition-colors flex items-center space-x-1"
+                            title="删除视频"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                            <span>删除</span>
+                          </button>
+                          <button 
+                            className="px-4 py-2 text-sm text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                          >
+                            {expandedVideoId === video.id ? '收起详情' : '查看详情'}
+                          </button>
+                        </div>
                       </div>
                     </div>
                     {expandedVideoId === video.id && (
@@ -312,6 +387,7 @@ export default function TaskQueueStats({ onVideoSelect }: TaskQueueStatsProps) {
                           <TaskStepDetail 
                             steps={detailedVideo.task_steps} 
                             onRetry={(stepName) => handleRetryStep(video.id, stepName)}
+                            onResetAllFailed={() => handleResetAllFailed(video.id)}
                           />
                         ) : (
                           <div className="text-center text-gray-500">无任务步骤信息</div>
@@ -441,7 +517,7 @@ export default function TaskQueueStats({ onVideoSelect }: TaskQueueStatsProps) {
   );
 }
 
-const TaskStepDetail = ({ steps, onRetry }: { steps: TaskStep[], onRetry: (stepName: string) => void }) => {
+const TaskStepDetail = ({ steps, onRetry, onResetAllFailed }: { steps: TaskStep[], onRetry: (stepName: string) => void, onResetAllFailed?: () => void }) => {
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'completed':
@@ -450,15 +526,31 @@ const TaskStepDetail = ({ steps, onRetry }: { steps: TaskStep[], onRetry: (stepN
         return 'bg-red-100 text-red-800';
       case 'running':
         return 'bg-blue-100 text-blue-800';
+      case 'skipped':
+        return 'bg-yellow-100 text-yellow-800';
       case 'pending':
       default:
         return 'bg-gray-100 text-gray-800';
     }
   };
 
+  // 检查是否有失败或跳过的步骤
+  const hasFailedSteps = steps.some(step => step.status === 'failed' || step.status === 'skipped');
+
   return (
     <div className="space-y-3">
-      <h5 className="font-semibold text-gray-800">任务步骤</h5>
+      <div className="flex items-center justify-between">
+        <h5 className="font-semibold text-gray-800">任务步骤</h5>
+        {hasFailedSteps && onResetAllFailed && (
+          <button
+            onClick={onResetAllFailed}
+            className="inline-flex items-center px-3 py-1.5 text-sm font-medium text-orange-700 bg-orange-50 border border-orange-300 rounded-lg hover:bg-orange-100 transition-colors"
+          >
+            <RotateCcw className="w-4 h-4 mr-1.5" />
+            一键重置失败任务
+          </button>
+        )}
+      </div>
       <ul className="space-y-2">
         {steps.sort((a, b) => a.step_order - b.step_order).map(step => (
           <li key={step.step_name} className="p-3 bg-white rounded-lg border border-gray-200">

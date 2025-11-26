@@ -95,6 +95,11 @@ export const videoApi = {
     return api.post(`/videos/${videoId}/steps/${stepName}/retry`);
   },
 
+  // 重置所有失败的任务步骤
+  resetAllFailedSteps: (videoId: string): Promise<ApiResponse<{ reset_count: number; reset_steps: string[] }>> => {
+    return api.post(`/videos/${videoId}/steps/reset-failed`);
+  },
+
   // 提交新视频
   submitVideo: (data: VideoSubmissionRequest): Promise<ApiResponse<Video>> => {
     return api.post('/submit', data);

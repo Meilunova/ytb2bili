@@ -10,6 +10,7 @@ import (
 	"github.com/difyz9/ytb2bili/internal/chain_task/base"
 	"github.com/difyz9/ytb2bili/internal/chain_task/manager"
 	"github.com/difyz9/ytb2bili/internal/core"
+	"github.com/difyz9/ytb2bili/internal/core/services"
 	"github.com/difyz9/ytb2bili/pkg/cos"
 	"github.com/difyz9/ytb2bili/pkg/utils"
 	"gorm.io/gorm"
@@ -17,14 +18,19 @@ import (
 
 type TranslateSubtitle struct {
 	base.BaseTask
-	App        *core.AppServer
-	DB         *gorm.DB
-	APIKey     string
-	GroupSize  int
-	MaxWorkers int // 最大并发数
+	App          *core.AppServer
+	DB           *gorm.DB
+	APIKey       string
+	GroupSize    int
+	MaxWorkers   int // 最大并发数
+	AIManager    *services.AIServiceManager
+	LastProvider services.AIProvider // 记录最后使用的AI提供商
 }
 
 func NewTranslateSubtitle(name string, app *core.AppServer, stateManager *manager.StateManager, client *cos.CosClient, db *gorm.DB, apiKey string) *TranslateSubtitle {
+	// 创建AI服务管理器
+	aiManager := services.NewAIServiceManager(app.Config, app.Logger)
+
 	return &TranslateSubtitle{
 		BaseTask: base.BaseTask{
 			Name:         name,
@@ -36,21 +42,39 @@ func NewTranslateSubtitle(name string, app *core.AppServer, stateManager *manage
 		APIKey:     "", // 不再固化API Key，运行时动态获取
 		GroupSize:  25, // 每组25句，减少API调用次数
 		MaxWorkers: 3,  // 最多3个并发，避免API限制
+		AIManager:  aiManager,
 	}
 }
 
-// getCurrentAPIKey 获取当前的DeepSeek API Key（实时从配置中读取）
+// getCurrentAIProvider 获取当前可用的AI服务提供商
+func (t *TranslateSubtitle) getCurrentAIProvider() (services.AIProvider, error) {
+	// 刷新配置
+	t.AIManager.RefreshConfig(t.App.Config)
+
+	// 获取首选提供商
+	provider, err := t.AIManager.GetPreferredProvider()
+	if err != nil {
+		return "", fmt.Errorf("没有可用的AI服务: %v", err)
+	}
+
+	return provider, nil
+}
+
+// getCurrentAPIKey 获取当前的API Key（兼容旧代码）
 func (t *TranslateSubtitle) getCurrentAPIKey() (string, error) {
-	if t.App.Config.DeepSeekTransConfig == nil || !t.App.Config.DeepSeekTransConfig.Enabled {
-		return "", fmt.Errorf("DeepSeek 翻译服务未启用")
+	// 优先使用OpenAI兼容API
+	if t.AIManager.IsOpenAICompatibleEnabled() {
+		cfg := t.AIManager.GetOpenAICompatibleConfig()
+		return cfg.ApiKey, nil
 	}
 
-	apiKey := t.App.Config.DeepSeekTransConfig.ApiKey
-	if apiKey == "" {
-		return "", fmt.Errorf("DeepSeek API Key 未配置")
+	// 备选：DeepSeek
+	if t.AIManager.IsDeepSeekEnabled() {
+		cfg := t.AIManager.GetDeepSeekConfig()
+		return cfg.ApiKey, nil
 	}
 
-	return apiKey, nil
+	return "", fmt.Errorf("没有可用的AI服务，请先配置AI服务")
 }
 
 // SRTEntry SRT字幕条目
@@ -65,17 +89,19 @@ func (t *TranslateSubtitle) Execute(context map[string]interface{}) bool {
 	t.App.Logger.Infof("开始翻译字幕: VideoID=%s", t.StateManager.VideoID)
 	t.App.Logger.Info("========================================")
 
-	// 0. 动态获取最新的API Key配置
-	currentAPIKey, err := t.getCurrentAPIKey()
+	// 0. 刷新AI服务管理器配置并获取首选AI服务
+	t.AIManager.RefreshConfig(t.App.Config)
+	provider, err := t.getCurrentAIProvider()
 	if err != nil {
 		t.App.Logger.Errorf("❌ %v", err)
 		context["error"] = t.getTranslationError(err)
 		return false
 	}
 
-	t.App.Logger.Infof("🔑 使用DeepSeek API Key: %s", maskAPIKey(currentAPIKey))
-	// 更新当前使用的API Key
-	t.APIKey = currentAPIKey
+	// 记录使用的AI服务
+	t.LastProvider = provider
+	status := t.AIManager.GetStatus(provider)
+	t.App.Logger.Infof("🤖 使用AI服务: %s (模型: %s)", status.Name, status.Model)
 
 	// 1. 检查英文字幕文件是否存在（由 GenerateSubtitles 任务生成）
 	enSRTPath := filepath.Join(t.StateManager.CurrentDir, fmt.Sprintf("%s.srt", t.StateManager.VideoID))
@@ -520,21 +546,18 @@ func (t *TranslateSubtitle) translateGroupWithContext(texts []string, prevContex
 	return translatedSentences, nil
 }
 
-// callDeepSeekAPI 调用DeepSeek API（实时获取最新的API Key）
+// callDeepSeekAPI 调用AI API（使用AI服务管理器，支持自动故障转移）
 func (t *TranslateSubtitle) callDeepSeekAPI(systemPrompt, userPrompt string) (string, error) {
-	// 实时从配置中获取最新的API Key
-	currentAPIKey, err := t.getCurrentAPIKey()
+	// 使用AI服务管理器进行调用（自动选择首选服务，失败时自动切换）
+	response, provider, err := t.AIManager.ChatCompletion(systemPrompt, userPrompt)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("AI服务调用失败: %v", err)
 	}
 
-	// 添加调试日志，显示当前使用的API Key（用于验证热更新是否生效）
-	t.App.Logger.Debugf("🔑 当前使用API Key: %s", maskAPIKey(currentAPIKey))
-
-	client := NewDeepSeekClient(currentAPIKey)
-	response, err := client.ChatCompletion(systemPrompt, userPrompt)
-	if err != nil {
-		return "", fmt.Errorf("调用DeepSeek API失败: %v", err)
+	// 记录实际使用的提供商
+	if provider != t.LastProvider {
+		t.App.Logger.Infof("🔄 AI服务已切换: %s -> %s", t.LastProvider, provider)
+		t.LastProvider = provider
 	}
 
 	return response, nil
@@ -544,12 +567,16 @@ func (t *TranslateSubtitle) callDeepSeekAPI(systemPrompt, userPrompt string) (st
 func (t *TranslateSubtitle) getTranslationError(err error) string {
 	errorStr := err.Error()
 
-	if strings.Contains(errorStr, "DeepSeek API Key 未配置") {
-		return "翻译失败：DeepSeek API Key未配置，请在设置中配置API Key"
+	if strings.Contains(errorStr, "没有可用的AI服务") {
+		return "翻译失败：没有可用的AI服务，请在设置中配置AI服务（首选OpenAI兼容API或DeepSeek）"
+	}
+
+	if strings.Contains(errorStr, "API Key 未配置") || strings.Contains(errorStr, "API Key未配置") {
+		return "翻译失败：AI服务API Key未配置，请在设置中配置API Key"
 	}
 
 	if strings.Contains(errorStr, "401") || strings.Contains(errorStr, "unauthorized") {
-		return "翻译失败：DeepSeek API Key无效或已过期，请检查API Key设置"
+		return "翻译失败：AI服务API Key无效或已过期，请检查API Key设置"
 	}
 
 	if strings.Contains(errorStr, "429") || strings.Contains(errorStr, "rate limit") {

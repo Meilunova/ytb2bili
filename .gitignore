@@ -28,6 +28,11 @@ bili-up-api-server
 bili_up_backend
 dist/
 build/
+# Next.js 构建产物
+.next/
+*/_next/
+web/output/
+internal/web/bili-up-web/_next/
 
 # 依赖
 node_modules/
@@ -51,3 +56,7 @@ coverage.html
 
 # Docker
 .dockerignore
+config.toml.backup
+cookies.txt
+ytb2bili.exe
+yt-dlp.exe

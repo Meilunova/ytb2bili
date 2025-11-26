@@ -20,14 +20,18 @@ type AppConfig struct {
 	FileUpDir   string        `toml:"fileUpDir"`
 	YtDlpPath   string        `toml:"yt_dlp_path"` // yt-dlp 安装路径
 
-	TenCosConfig        *TencentCosConfig    `toml:"TenCosConfig"`        // 腾讯云 COS 存储配置
-	BaiduTransConfig    *BaiduTransConfig    `toml:"BaiduTransConfig"`    // 百度翻译服务配置
-	DeepSeekTransConfig *DeepSeekTransConfig `toml:"DeepSeekTransConfig"` // DeepSeek翻译服务配置
-	GeminiConfig        *GeminiConfig        `toml:"GeminiConfig"`        // Gemini多模态服务配置
-	TranslatorConfig    *TranslatorConfig    `toml:"TranslatorConfig"`    // 翻译器总配置
-	ProxyConfig         *ProxyConfig         `toml:"ProxyConfig"`         // 代理配置
-	AnalyticsConfig     *AnalyticsConfig     `toml:"AnalyticsConfig"`     // 数据分析配置
-	BilibiliConfig      *BilibiliConfig      `toml:"BilibiliConfig"`      // Bilibili上传配置
+	TenCosConfig           *TencentCosConfig       `toml:"TenCosConfig"`           // 腾讯云 COS 存储配置
+	BaiduTransConfig       *BaiduTransConfig       `toml:"BaiduTransConfig"`       // 百度翻译服务配置
+	DeepSeekTransConfig    *DeepSeekTransConfig    `toml:"DeepSeekTransConfig"`    // DeepSeek翻译服务配置
+	GeminiConfig           *GeminiConfig           `toml:"GeminiConfig"`           // Gemini多模态服务配置
+	OpenAICompatibleConfig *OpenAICompatibleConfig `toml:"OpenAICompatibleConfig"` // OpenAI兼容API配置
+	TranslatorConfig       *TranslatorConfig       `toml:"TranslatorConfig"`       // 翻译器总配置
+	ProxyConfig            *ProxyConfig            `toml:"ProxyConfig"`            // 代理配置
+	AnalyticsConfig        *AnalyticsConfig        `toml:"AnalyticsConfig"`        // 数据分析配置
+	BilibiliConfig         *BilibiliConfig         `toml:"BilibiliConfig"`         // Bilibili上传配置
+
+	// AI服务选择配置
+	PrimaryAIService string `toml:"primary_ai_service"` // 用户选择的首选AI服务: openai_compatible, deepseek, gemini
 }
 
 // BilibiliConfig Bilibili上传配置
@@ -135,14 +139,59 @@ type DeepSeekTransConfig struct {
 
 // GeminiConfig Gemini多模态服务配置
 type GeminiConfig struct {
-	Enabled           bool   `toml:"enabled"`             // 是否启用Gemini服务
-	ApiKey            string `toml:"api_key"`             // Google AI API密钥
-	Model             string `toml:"model"`               // 使用的模型，默认为 gemini-1.5-pro
-	Timeout           int    `toml:"timeout"`             // 超时时间（秒）
-	MaxTokens         int    `toml:"max_tokens"`          // 最大输出token数
-	UseForMetadata    bool   `toml:"use_for_metadata"`    // 是否使用Gemini生成元数据（优先于DeepSeek）
-	AnalyzeVideo      bool   `toml:"analyze_video"`       // 是否分析视频文件（true=多模态，false=仅文本）
-	VideoSampleFrames int    `toml:"video_sample_frames"` // 视频采样帧数（0=上传完整视频）
+	Enabled           bool     `toml:"enabled"`             // 是否启用Gemini服务
+	ApiKey            string   `toml:"api_key"`             // Google AI API密钥（主密钥，兼容旧配置）
+	ApiKeys           []string `toml:"api_keys"`            // 多个API密钥，用于轮询（优先使用）
+	CurrentKeyIndex   int      `toml:"-"`                   // 当前使用的密钥索引（运行时状态，不保存）
+	Model             string   `toml:"model"`               // 使用的模型，默认为 gemini-1.5-pro
+	Timeout           int      `toml:"timeout"`             // 超时时间（秒）
+	MaxTokens         int      `toml:"max_tokens"`          // 最大输出token数
+	UseForMetadata    bool     `toml:"use_for_metadata"`    // 是否使用Gemini生成元数据（优先于DeepSeek）
+	AnalyzeVideo      bool     `toml:"analyze_video"`       // 是否分析视频文件（true=多模态，false=仅文本）
+	VideoSampleFrames int      `toml:"video_sample_frames"` // 视频采样帧数（0=上传完整视频）
+}
+
+// GetCurrentApiKey 获取当前使用的API密钥
+func (g *GeminiConfig) GetCurrentApiKey() string {
+	// 优先使用 ApiKeys 数组
+	if len(g.ApiKeys) > 0 {
+		index := g.CurrentKeyIndex % len(g.ApiKeys)
+		return g.ApiKeys[index]
+	}
+	// 兼容旧配置，使用单个 ApiKey
+	return g.ApiKey
+}
+
+// RotateApiKey 轮换到下一个API密钥
+func (g *GeminiConfig) RotateApiKey() string {
+	if len(g.ApiKeys) > 1 {
+		g.CurrentKeyIndex = (g.CurrentKeyIndex + 1) % len(g.ApiKeys)
+	}
+	return g.GetCurrentApiKey()
+}
+
+// GetApiKeysCount 获取API密钥数量
+func (g *GeminiConfig) GetApiKeysCount() int {
+	if len(g.ApiKeys) > 0 {
+		return len(g.ApiKeys)
+	}
+	if g.ApiKey != "" {
+		return 1
+	}
+	return 0
+}
+
+// OpenAICompatibleConfig OpenAI兼容API配置
+// 支持任何兼容OpenAI API格式的服务
+type OpenAICompatibleConfig struct {
+	Enabled     bool    `toml:"enabled"`     // 是否启用
+	Provider    string  `toml:"provider"`    // 提供商标识: openai, deepseek, qwen, zhipu, gemini, custom
+	ApiKey      string  `toml:"api_key"`     // API密钥
+	BaseURL     string  `toml:"base_url"`    // API基础URL
+	Model       string  `toml:"model"`       // 使用的模型
+	Timeout     int     `toml:"timeout"`     // 超时时间（秒）
+	MaxTokens   int     `toml:"max_tokens"`  // 最大token数
+	Temperature float64 `toml:"temperature"` // 温度参数 (0-2)
 }
 
 // TranslatorConfig 翻译器总配置
@@ -228,6 +277,18 @@ func NewDefaultConfig() *AppConfig {
 			VideoSampleFrames: 0,     // 默认上传完整视频
 		},
 
+		// OpenAI兼容API配置（默认值，可被 config.toml 覆盖）
+		OpenAICompatibleConfig: &OpenAICompatibleConfig{
+			Enabled:     false,
+			Provider:    "openai",
+			ApiKey:      "",
+			BaseURL:     "https://api.openai.com/v1",
+			Model:       "gpt-3.5-turbo",
+			Timeout:     60,
+			MaxTokens:   4000,
+			Temperature: 0.7,
+		},
+
 		// 代理配置（默认值，可被 config.toml 覆盖）
 		ProxyConfig: &ProxyConfig{
 			UseProxy:  false,
@@ -277,19 +338,20 @@ func LoadConfig(configFile string) (*AppConfig, error) {
 
 	// 创建临时结构体用于读取 config.toml（只包含可配置字段）
 	var fileConfig struct {
-		Listen              string               `toml:"listen"`
-		Environment         string               `toml:"environment"`
-		Debug               bool                 `toml:"debug"`
-		Database            Database             `toml:"database"`
-		Auth                AuthConfig           `toml:"auth"`
-		FileUpDir           string               `toml:"fileUpDir"`
-		YtDlpPath           string               `toml:"yt_dlp_path"`
-		TenCosConfig        *TencentCosConfig    `toml:"TenCosConfig"`
-		DeepSeekTransConfig *DeepSeekTransConfig `toml:"DeepSeekTransConfig"`
-		GeminiConfig        *GeminiConfig        `toml:"GeminiConfig"`
-		ProxyConfig         *ProxyConfig         `toml:"ProxyConfig"`
-		AnalyticsConfig     *AnalyticsConfig     `toml:"AnalyticsConfig"`
-		BilibiliConfig      *BilibiliConfig      `toml:"BilibiliConfig"`
+		Listen                 string                  `toml:"listen"`
+		Environment            string                  `toml:"environment"`
+		Debug                  bool                    `toml:"debug"`
+		Database               Database                `toml:"database"`
+		Auth                   AuthConfig              `toml:"auth"`
+		FileUpDir              string                  `toml:"fileUpDir"`
+		YtDlpPath              string                  `toml:"yt_dlp_path"`
+		TenCosConfig           *TencentCosConfig       `toml:"TenCosConfig"`
+		DeepSeekTransConfig    *DeepSeekTransConfig    `toml:"DeepSeekTransConfig"`
+		GeminiConfig           *GeminiConfig           `toml:"GeminiConfig"`
+		OpenAICompatibleConfig *OpenAICompatibleConfig `toml:"OpenAICompatibleConfig"`
+		ProxyConfig            *ProxyConfig            `toml:"ProxyConfig"`
+		AnalyticsConfig        *AnalyticsConfig        `toml:"AnalyticsConfig"`
+		BilibiliConfig         *BilibiliConfig         `toml:"BilibiliConfig"`
 	}
 
 	// 解码TOML配置文件
@@ -315,6 +377,9 @@ func LoadConfig(configFile string) (*AppConfig, error) {
 	if fileConfig.GeminiConfig != nil {
 		config.GeminiConfig = fileConfig.GeminiConfig
 	}
+	if fileConfig.OpenAICompatibleConfig != nil {
+		config.OpenAICompatibleConfig = fileConfig.OpenAICompatibleConfig
+	}
 	if fileConfig.ProxyConfig != nil {
 		config.ProxyConfig = fileConfig.ProxyConfig
 	}
@@ -332,33 +397,35 @@ func LoadConfig(configFile string) (*AppConfig, error) {
 func SaveConfig(config *AppConfig) error {
 	// 只保存用户可配置的字段
 	fileConfig := struct {
-		Listen              string               `toml:"listen"`
-		Environment         string               `toml:"environment"`
-		Debug               bool                 `toml:"debug"`
-		Database            Database             `toml:"database"`
-		Auth                AuthConfig           `toml:"auth"`
-		FileUpDir           string               `toml:"fileUpDir"`
-		YtDlpPath           string               `toml:"yt_dlp_path"`
-		TenCosConfig        *TencentCosConfig    `toml:"TenCosConfig"`
-		DeepSeekTransConfig *DeepSeekTransConfig `toml:"DeepSeekTransConfig"`
-		GeminiConfig        *GeminiConfig        `toml:"GeminiConfig"`
-		ProxyConfig         *ProxyConfig         `toml:"ProxyConfig"`
-		AnalyticsConfig     *AnalyticsConfig     `toml:"AnalyticsConfig"`
-		BilibiliConfig      *BilibiliConfig      `toml:"BilibiliConfig"`
+		Listen                 string                  `toml:"listen"`
+		Environment            string                  `toml:"environment"`
+		Debug                  bool                    `toml:"debug"`
+		Database               Database                `toml:"database"`
+		Auth                   AuthConfig              `toml:"auth"`
+		FileUpDir              string                  `toml:"fileUpDir"`
+		YtDlpPath              string                  `toml:"yt_dlp_path"`
+		TenCosConfig           *TencentCosConfig       `toml:"TenCosConfig"`
+		DeepSeekTransConfig    *DeepSeekTransConfig    `toml:"DeepSeekTransConfig"`
+		GeminiConfig           *GeminiConfig           `toml:"GeminiConfig"`
+		OpenAICompatibleConfig *OpenAICompatibleConfig `toml:"OpenAICompatibleConfig"`
+		ProxyConfig            *ProxyConfig            `toml:"ProxyConfig"`
+		AnalyticsConfig        *AnalyticsConfig        `toml:"AnalyticsConfig"`
+		BilibiliConfig         *BilibiliConfig         `toml:"BilibiliConfig"`
 	}{
-		Listen:              config.Listen,
-		Environment:         config.Environment,
-		Debug:               config.Debug,
-		Database:            config.Database,
-		Auth:                config.Auth,
-		FileUpDir:           config.FileUpDir,
-		YtDlpPath:           config.YtDlpPath,
-		TenCosConfig:        config.TenCosConfig,
-		DeepSeekTransConfig: config.DeepSeekTransConfig,
-		GeminiConfig:        config.GeminiConfig,
-		ProxyConfig:         config.ProxyConfig,
-		AnalyticsConfig:     config.AnalyticsConfig,
-		BilibiliConfig:      config.BilibiliConfig,
+		Listen:                 config.Listen,
+		Environment:            config.Environment,
+		Debug:                  config.Debug,
+		Database:               config.Database,
+		Auth:                   config.Auth,
+		FileUpDir:              config.FileUpDir,
+		YtDlpPath:              config.YtDlpPath,
+		TenCosConfig:           config.TenCosConfig,
+		DeepSeekTransConfig:    config.DeepSeekTransConfig,
+		GeminiConfig:           config.GeminiConfig,
+		OpenAICompatibleConfig: config.OpenAICompatibleConfig,
+		ProxyConfig:            config.ProxyConfig,
+		AnalyticsConfig:        config.AnalyticsConfig,
+		BilibiliConfig:         config.BilibiliConfig,
 	}
 
 	buf := new(bytes.Buffer)

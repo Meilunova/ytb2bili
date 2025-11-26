@@ -23,9 +23,14 @@ type GenerateMetadata struct {
 	DeepSeekClient    *DeepSeekClient
 	GeminiClient      *GeminiClient
 	SavedVideoService *services.SavedVideoService
+	AIManager         *services.AIServiceManager
+	LastProvider      services.AIProvider
 }
 
 func NewGenerateMetadata(name string, app *core.AppServer, stateManager *manager.StateManager, client *cos.CosClient, apiKey string, db *gorm.DB, savedVideoService *services.SavedVideoService) *GenerateMetadata {
+	// 创建AI服务管理器
+	aiManager := services.NewAIServiceManager(app.Config, app.Logger)
+
 	return &GenerateMetadata{
 		BaseTask: base.BaseTask{
 			Name:         name,
@@ -35,10 +40,25 @@ func NewGenerateMetadata(name string, app *core.AppServer, stateManager *manager
 		App:               app,
 		DeepSeekClient:    nil, // 不再固化客户端，运行时动态创建
 		SavedVideoService: savedVideoService,
+		AIManager:         aiManager,
 	}
 }
 
-// getCurrentDeepSeekClient 获取当前的DeepSeek客户端（使用最新配置）
+// getCurrentAIProvider 获取当前可用的AI服务提供商
+func (g *GenerateMetadata) getCurrentAIProvider() (services.AIProvider, error) {
+	// 刷新配置
+	g.AIManager.RefreshConfig(g.App.Config)
+
+	// 获取首选提供商
+	provider, err := g.AIManager.GetPreferredProvider()
+	if err != nil {
+		return "", fmt.Errorf("没有可用的AI服务: %v", err)
+	}
+
+	return provider, nil
+}
+
+// getCurrentDeepSeekClient 获取当前的DeepSeek客户端（使用最新配置，兼容旧代码）
 func (g *GenerateMetadata) getCurrentDeepSeekClient() (*DeepSeekClient, error) {
 	if g.App.Config.DeepSeekTransConfig == nil || !g.App.Config.DeepSeekTransConfig.Enabled {
 		return nil, fmt.Errorf("DeepSeek 翻译服务未启用")
@@ -61,63 +81,260 @@ type VideoMetadata struct {
 func (g *GenerateMetadata) Execute(context map[string]interface{}) bool {
 	g.App.Logger.Info("========================================")
 	g.App.Logger.Infof("开始生成视频标题和描述: VideoID=%s", g.StateManager.VideoID)
+	g.App.Logger.Infof("📁 工作目录: %s", g.StateManager.CurrentDir)
 	g.App.Logger.Info("========================================")
 
-	// 0. 检查是否使用 Gemini
-	useGemini := false
-	if g.App.Config.GeminiConfig != nil && g.App.Config.GeminiConfig.Enabled && g.App.Config.GeminiConfig.UseForMetadata {
-		useGemini = true
-		g.App.Logger.Info("🤖 使用 Gemini 多模态服务生成元数据")
+	// 列出工作目录中的文件，帮助调试
+	g.logDirectoryContents()
 
-		// 如果配置了视频分析，尝试使用视频文件
-		if g.App.Config.GeminiConfig.AnalyzeVideo {
-			if success := g.executeWithGeminiVideo(context); success {
-				return true
-			}
-			g.App.Logger.Warn("⚠️ Gemini 视频分析失败，回退到文本模式")
-		}
+	// 0. 刷新AI服务管理器配置
+	g.AIManager.RefreshConfig(g.App.Config)
 
-		// 使用 Gemini 处理字幕文本
-		if success := g.executeWithGeminiText(context); success {
+	// ⚠️ 元数据生成必须使用 Gemini（多模态视频分析能力）
+	// 检查 Gemini 是否已配置
+	if g.App.Config.GeminiConfig == nil || !g.App.Config.GeminiConfig.Enabled || g.App.Config.GeminiConfig.ApiKey == "" {
+		g.App.Logger.Error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+		g.App.Logger.Error("❌ 元数据生成需要配置 Gemini 服务！")
+		g.App.Logger.Error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+		g.App.Logger.Warn("💡 Gemini 具有多模态视频分析能力，是生成高质量元数据的最佳选择")
+		g.App.Logger.Warn("💡 请在设置页面配置 Gemini API Key 并启用")
+		g.App.Logger.Warn("💡 配置路径: 设置 → AI 大模型 → Gemini 原生多模态")
+
+		// 尝试使用备选方案（用户首选AI或DeepSeek）生成基础元数据
+		g.App.Logger.Info("🔄 尝试使用备选AI服务生成基础元数据...")
+		return g.executeWithFallbackAI(context)
+	}
+
+	// 1. 首选：使用 Gemini 多模态服务生成元数据
+	g.App.Logger.Info("🤖 使用 Gemini 多模态服务生成元数据")
+	g.App.Logger.Infof("📋 Gemini 配置: Model=%s, Timeout=%ds, AnalyzeVideo=%v",
+		g.App.Config.GeminiConfig.Model,
+		g.App.Config.GeminiConfig.Timeout,
+		g.App.Config.GeminiConfig.AnalyzeVideo)
+
+	// 如果配置了视频分析，尝试使用视频文件
+	if g.App.Config.GeminiConfig.AnalyzeVideo {
+		g.App.Logger.Info("🎬 尝试 Gemini 视频分析模式...")
+		if success := g.executeWithGeminiVideo(context); success {
 			return true
 		}
-		g.App.Logger.Warn("⚠️ Gemini 文本分析失败，回退到 DeepSeek")
-		useGemini = false
+		g.App.Logger.Warn("⚠️ Gemini 视频分析失败，回退到文本模式")
 	}
 
-	// 使用 DeepSeek（默认或回退）
-	if !useGemini {
-		return g.executeWithDeepSeek(context)
+	// 使用 Gemini 处理字幕文本
+	g.App.Logger.Info("📝 尝试 Gemini 文本分析模式...")
+	if success := g.executeWithGeminiText(context); success {
+		return true
 	}
 
+	// 2. Gemini 失败时，使用备选AI服务
+	g.App.Logger.Warn("⚠️ Gemini 分析失败，尝试备选AI服务...")
+	return g.executeWithFallbackAI(context)
+}
+
+// executeWithFallbackAI 使用备选AI服务生成元数据（当Gemini不可用时）
+func (g *GenerateMetadata) executeWithFallbackAI(ctx map[string]interface{}) bool {
+	// 尝试用户首选的AI服务
+	if g.AIManager.IsOpenAICompatibleEnabled() {
+		provider, _ := g.getCurrentAIProvider()
+		g.LastProvider = provider
+		status := g.AIManager.GetStatus(provider)
+		g.App.Logger.Infof("🔄 使用备选AI服务: %s (模型: %s)", status.Name, status.Model)
+
+		if success := g.executeWithAIManager(ctx); success {
+			return true
+		}
+		g.App.Logger.Warn("⚠️ 备选AI服务失败...")
+	}
+
+	// 最后尝试 DeepSeek
+	if g.AIManager.IsDeepSeekEnabled() {
+		g.App.Logger.Info("🔄 尝试 DeepSeek 模式...")
+		return g.executeWithDeepSeek(ctx)
+	}
+
+	g.App.Logger.Error("❌ 所有AI服务都不可用，无法生成元数据")
 	return false
+}
+
+// executeWithAIManager 使用AI服务管理器生成元数据（首选方式）
+func (g *GenerateMetadata) executeWithAIManager(ctx map[string]interface{}) bool {
+	g.App.Logger.Info("🔄 使用AI服务管理器生成元数据...")
+
+	// 1. 检查中文字幕文件是否存在
+	zhSRTPath := filepath.Join(g.StateManager.CurrentDir, "zh.srt")
+	g.App.Logger.Infof("🔍 检查中文字幕文件: %s", zhSRTPath)
+	if _, err := os.Stat(zhSRTPath); os.IsNotExist(err) {
+		g.App.Logger.Warnf("⚠️ 中文字幕文件不存在: %s", zhSRTPath)
+		g.App.Logger.Warn("⚠️ 请确保字幕翻译步骤已成功完成，使用默认标题和描述")
+		ctx["video_title"] = g.StateManager.VideoID
+		ctx["video_description"] = "包含字幕的视频"
+		return true
+	}
+	g.App.Logger.Infof("✓ 找到中文字幕文件: %s", zhSRTPath)
+
+	// 2. 读取中文字幕内容
+	srtContent, err := os.ReadFile(zhSRTPath)
+	if err != nil {
+		g.App.Logger.Errorf("❌ 读取中文字幕文件失败: %v", err)
+		ctx["error"] = "读取翻译字幕失败，请确保字幕翻译步骤已完成"
+		return false
+	}
+
+	// 3. 解析字幕提取文本
+	subtitleText := g.extractTextFromSRT(string(srtContent))
+	if subtitleText == "" {
+		g.App.Logger.Warn("⚠️ 字幕内容为空，使用默认标题和描述")
+		ctx["video_title"] = g.StateManager.VideoID
+		ctx["video_description"] = "包含字幕的视频"
+		return true
+	}
+
+	g.App.Logger.Infof("📝 提取到字幕文本，总长度: %d 字符", len(subtitleText))
+
+	// 4. 截取前1000字符用于生成标题和描述
+	maxLength := 1000
+	if len(subtitleText) > maxLength {
+		subtitleText = subtitleText[:maxLength] + "..."
+	}
+
+	// 5. 使用AI服务管理器生成元数据
+	g.App.Logger.Info("🤖 调用AI服务生成标题和描述...")
+	metadata, err := g.generateMetadataWithAIManager(subtitleText)
+	if err != nil {
+		g.App.Logger.Errorf("❌ AI服务生成元数据失败: %v", err)
+		return false // 返回false让调用者尝试备选服务
+	}
+
+	// 6. 验证标题长度（Bilibili限制80字符）
+	if len([]rune(metadata.Title)) > 80 {
+		runes := []rune(metadata.Title)
+		metadata.Title = string(runes[:77]) + "..."
+		g.App.Logger.Warnf("⚠️ 标题过长，已截断为80字符")
+	}
+
+	// 7. 保存到 context
+	ctx["video_title"] = metadata.Title
+	ctx["video_description"] = metadata.Description
+	ctx["video_tags"] = metadata.Tags
+
+	// 8. 保存到 meta.json 文件
+	g.App.Logger.Info("💾 保存元数据到 meta.json 文件...")
+	if err := g.saveMetadataToFile(metadata); err != nil {
+		g.App.Logger.Errorf("❌ 保存 meta.json 文件失败: %v", err)
+	} else {
+		g.App.Logger.Info("✅ meta.json 文件已保存")
+	}
+
+	// 9. 保存到数据库
+	g.App.Logger.Info("💾 保存生成的元数据到数据库...")
+	savedVideo, err := g.SavedVideoService.GetVideoByVideoID(g.StateManager.VideoID)
+	if err != nil {
+		g.App.Logger.Errorf("❌ 获取视频记录失败: %v", err)
+	} else {
+		savedVideo.GeneratedTitle = metadata.Title
+		savedVideo.GeneratedDesc = metadata.Description
+		if len(metadata.Tags) > 0 {
+			tagsJSON, _ := json.Marshal(metadata.Tags)
+			savedVideo.GeneratedTags = string(tagsJSON)
+		}
+		if err := g.SavedVideoService.UpdateVideo(savedVideo); err != nil {
+			g.App.Logger.Errorf("❌ 更新视频记录失败: %v", err)
+		} else {
+			g.App.Logger.Info("✅ 数据库记录已更新")
+		}
+	}
+
+	g.App.Logger.Infof("✓ 生成标题: %s", metadata.Title)
+	g.App.Logger.Infof("✓ 生成描述: %s", truncateString(metadata.Description, 100))
+	g.App.Logger.Infof("✓ 生成标签: %v", metadata.Tags)
+	g.App.Logger.Info("========================================")
+
+	return true
+}
+
+// generateMetadataWithAIManager 使用AI服务管理器生成元数据
+func (g *GenerateMetadata) generateMetadataWithAIManager(subtitleText string) (*VideoMetadata, error) {
+	systemPrompt := `你是一个专业的视频内容分析师，擅长为Bilibili视频生成吸引人的标题和描述。
+
+请根据提供的字幕内容，生成：
+1. 标题：简洁有力，能吸引观众点击，不超过80个字符
+2. 描述：详细介绍视频内容，包含关键信息，适合SEO
+3. 标签：5-10个相关标签，用于视频分类和搜索
+
+请以JSON格式返回，格式如下：
+{
+  "title": "视频标题",
+  "description": "视频描述",
+  "tags": ["标签1", "标签2", "标签3"]
+}
+
+注意：
+- 标题要吸引人但不要标题党
+- 描述要详细但不要太长
+- 标签要相关且有搜索价值
+- 只返回JSON，不要添加其他内容`
+
+	userPrompt := fmt.Sprintf("请根据以下字幕内容生成视频元数据：\n\n%s", subtitleText)
+
+	// 使用AI服务管理器调用
+	response, provider, err := g.AIManager.ChatCompletion(systemPrompt, userPrompt)
+	if err != nil {
+		return nil, fmt.Errorf("AI服务调用失败: %v", err)
+	}
+
+	// 记录实际使用的提供商
+	if provider != g.LastProvider {
+		g.App.Logger.Infof("🔄 AI服务已切换: %s -> %s", g.LastProvider, provider)
+		g.LastProvider = provider
+	}
+
+	// 解析JSON响应
+	var metadata VideoMetadata
+	cleanResponse := strings.TrimSpace(response)
+	cleanResponse = strings.TrimPrefix(cleanResponse, "```json")
+	cleanResponse = strings.TrimPrefix(cleanResponse, "```")
+	cleanResponse = strings.TrimSuffix(cleanResponse, "```")
+	cleanResponse = strings.TrimSpace(cleanResponse)
+
+	if err := json.Unmarshal([]byte(cleanResponse), &metadata); err != nil {
+		return nil, fmt.Errorf("解析AI响应失败: %v, 原始响应: %s", err, response)
+	}
+
+	return &metadata, nil
 }
 
 // executeWithDeepSeek 使用 DeepSeek 生成元数据
 func (g *GenerateMetadata) executeWithDeepSeek(context map[string]interface{}) bool {
+	g.App.Logger.Info("🔄 使用 DeepSeek 生成元数据...")
+
 	// 0. 动态获取最新的DeepSeek客户端
 	client, err := g.getCurrentDeepSeekClient()
 	if err != nil {
-		g.App.Logger.Errorf("❌ %v", err)
+		g.App.Logger.Errorf("❌ 获取 DeepSeek 客户端失败: %v", err)
+		g.App.Logger.Warn("⚠️ 使用默认标题和描述")
 		// 使用默认值而不是失败
 		context["video_title"] = g.StateManager.VideoID
 		context["video_description"] = "包含字幕的视频"
 		return true
 	}
 
-	g.App.Logger.Infof("🔑 使用 DeepSeek 配置生成元数据")
+	g.App.Logger.Infof("🔑 DeepSeek 客户端创建成功")
 	// 更新当前使用的客户端
 	g.DeepSeekClient = client
 
 	// 1. 检查中文字幕文件是否存在
 	zhSRTPath := filepath.Join(g.StateManager.CurrentDir, "zh.srt")
+	g.App.Logger.Infof("🔍 检查中文字幕文件: %s", zhSRTPath)
 	if _, err := os.Stat(zhSRTPath); os.IsNotExist(err) {
-		g.App.Logger.Warn("⚠️  中文字幕文件不存在，使用默认标题和描述")
+		g.App.Logger.Warnf("⚠️ 中文字幕文件不存在: %s", zhSRTPath)
+		g.App.Logger.Warn("⚠️ 请确保字幕翻译步骤已成功完成，使用默认标题和描述")
 		// 使用默认值
 		context["video_title"] = g.StateManager.VideoID
 		context["video_description"] = fmt.Sprintf("包含字幕的视频")
 		return true // 没有字幕文件不算失败
 	}
+	g.App.Logger.Infof("✓ 找到中文字幕文件: %s", zhSRTPath)
 
 	// 2. 读取中文字幕内容
 	srtContent, err := os.ReadFile(zhSRTPath)
@@ -337,56 +554,98 @@ func (g *GenerateMetadata) truncateString(s string, maxLen int) string {
 // executeWithGeminiVideo 使用 Gemini 分析视频文件生成元数据
 func (g *GenerateMetadata) executeWithGeminiVideo(taskContext map[string]interface{}) bool {
 	g.App.Logger.Info("🎬 使用 Gemini 多模态分析视频文件...")
+	g.App.Logger.Infof("📁 搜索视频文件目录: %s", g.StateManager.CurrentDir)
 
-	// 1. 创建 Gemini 客户端
+	// 1. 创建 Gemini 客户端（使用轮询 API Key）
+	apiKey := g.App.Config.GeminiConfig.GetCurrentApiKey()
+	keyCount := g.App.Config.GeminiConfig.GetApiKeysCount()
+	keyIndex := g.App.Config.GeminiConfig.CurrentKeyIndex + 1
+	g.App.Logger.Infof("🔧 创建 Gemini 客户端 (API Key %d/%d)...", keyIndex, keyCount)
+
 	client, err := NewGeminiClient(
-		g.App.Config.GeminiConfig.ApiKey,
+		apiKey,
 		g.App.Config.GeminiConfig.Model,
 		g.App.Config.GeminiConfig.Timeout,
 		g.App.Config.GeminiConfig.MaxTokens,
 	)
 	if err != nil {
 		g.App.Logger.Errorf("❌ 创建 Gemini 客户端失败: %v", err)
+		// 尝试轮换到下一个 API Key
+		if keyCount > 1 {
+			g.App.Config.GeminiConfig.RotateApiKey()
+			g.App.Logger.Infof("🔄 轮换到下一个 API Key...")
+		}
 		return false
 	}
 	defer client.Close()
+	g.App.Logger.Info("✓ Gemini 客户端创建成功")
 
 	// 2. 查找视频文件
+	g.App.Logger.Info("🔍 查找视频文件...")
 	videoFiles := g.findVideoFiles()
 	if len(videoFiles) == 0 {
 		g.App.Logger.Warn("⚠️ 未找到视频文件")
+		g.App.Logger.Warnf("⚠️ 支持的视频格式: .mp4, .flv, .mkv, .webm, .avi, .mov")
 		return false
 	}
 	videoPath := videoFiles[0]
-	g.App.Logger.Infof("📹 找到视频文件: %s", filepath.Base(videoPath))
+
+	// 获取视频文件大小
+	if fileInfo, err := os.Stat(videoPath); err == nil {
+		fileSizeMB := float64(fileInfo.Size()) / 1024 / 1024
+		g.App.Logger.Infof("📹 找到视频文件: %s (%.2f MB)", filepath.Base(videoPath), fileSizeMB)
+	} else {
+		g.App.Logger.Infof("📹 找到视频文件: %s", filepath.Base(videoPath))
+	}
 
 	// 3. 上传视频到 Gemini
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(g.App.Config.GeminiConfig.Timeout)*time.Second)
+	timeoutSeconds := g.App.Config.GeminiConfig.Timeout
+	g.App.Logger.Infof("⏱️ 设置超时时间: %d 秒", timeoutSeconds)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSeconds)*time.Second)
 	defer cancel()
 
-	g.App.Logger.Info("⏫ 上传视频到 Gemini...")
+	g.App.Logger.Info("⏫ 开始上传视频到 Gemini...")
+	uploadStartTime := time.Now()
 	uploadedFile, err := client.UploadFile(ctx, videoPath, filepath.Base(videoPath))
 	if err != nil {
-		g.App.Logger.Errorf("❌ 上传视频失败: %v", err)
+		uploadDuration := time.Since(uploadStartTime)
+		g.App.Logger.Errorf("❌ 上传视频失败 (耗时 %.2f 秒): %v", uploadDuration.Seconds(), err)
+		if strings.Contains(err.Error(), "context deadline exceeded") {
+			g.App.Logger.Errorf("❌ 上传超时！当前超时设置为 %d 秒，建议增加 GeminiConfig.Timeout 配置值", timeoutSeconds)
+		}
 		return false
 	}
-	g.App.Logger.Infof("✓ 视频上传成功: %s", uploadedFile.Name)
+	uploadDuration := time.Since(uploadStartTime)
+	g.App.Logger.Infof("✓ 视频上传成功 (耗时 %.2f 秒): %s", uploadDuration.Seconds(), uploadedFile.Name)
 
 	// 4. 等待文件处理完成
 	g.App.Logger.Info("⏳ 等待 Gemini 处理视频...")
+	processStartTime := time.Now()
 	if err := client.WaitForFileProcessing(ctx, uploadedFile); err != nil {
-		g.App.Logger.Errorf("❌ 视频处理失败: %v", err)
+		processDuration := time.Since(processStartTime)
+		g.App.Logger.Errorf("❌ 视频处理失败 (耗时 %.2f 秒): %v", processDuration.Seconds(), err)
+		if strings.Contains(err.Error(), "context deadline exceeded") {
+			g.App.Logger.Errorf("❌ 处理超时！当前超时设置为 %d 秒，建议增加 GeminiConfig.Timeout 配置值", timeoutSeconds)
+		}
 		return false
 	}
-	g.App.Logger.Info("✓ 视频处理完成")
+	processDuration := time.Since(processStartTime)
+	g.App.Logger.Infof("✓ 视频处理完成 (耗时 %.2f 秒)", processDuration.Seconds())
 
 	// 5. 生成元数据
 	g.App.Logger.Info("🤖 调用 Gemini 生成元数据...")
+	generateStartTime := time.Now()
 	metadata, err := client.GenerateMetadataFromVideo(ctx, uploadedFile)
 	if err != nil {
-		g.App.Logger.Errorf("❌ 生成元数据失败: %v", err)
+		generateDuration := time.Since(generateStartTime)
+		g.App.Logger.Errorf("❌ 生成元数据失败 (耗时 %.2f 秒): %v", generateDuration.Seconds(), err)
+		if strings.Contains(err.Error(), "context deadline exceeded") {
+			g.App.Logger.Errorf("❌ 生成超时！当前超时设置为 %d 秒，建议增加 GeminiConfig.Timeout 配置值", timeoutSeconds)
+		}
 		return false
 	}
+	generateDuration := time.Since(generateStartTime)
+	g.App.Logger.Infof("✓ 元数据生成完成 (耗时 %.2f 秒)", generateDuration.Seconds())
 
 	// 6. 保存结果
 	return g.saveMetadataResults(metadata, taskContext)
@@ -398,8 +657,10 @@ func (g *GenerateMetadata) executeWithGeminiText(taskContext map[string]interfac
 
 	// 1. 检查中文字幕文件
 	zhSRTPath := filepath.Join(g.StateManager.CurrentDir, "zh.srt")
+	g.App.Logger.Infof("🔍 检查中文字幕文件: %s", zhSRTPath)
 	if _, err := os.Stat(zhSRTPath); os.IsNotExist(err) {
-		g.App.Logger.Warn("⚠️ 中文字幕文件不存在")
+		g.App.Logger.Warnf("⚠️ 中文字幕文件不存在: %s", zhSRTPath)
+		g.App.Logger.Warn("⚠️ 请确保字幕翻译步骤已成功完成")
 		return false
 	}
 
@@ -425,15 +686,25 @@ func (g *GenerateMetadata) executeWithGeminiText(taskContext map[string]interfac
 		subtitleText = subtitleText[:maxLength] + "..."
 	}
 
-	// 5. 创建 Gemini 客户端
+	// 5. 创建 Gemini 客户端（使用轮询 API Key）
+	apiKey := g.App.Config.GeminiConfig.GetCurrentApiKey()
+	keyCount := g.App.Config.GeminiConfig.GetApiKeysCount()
+	keyIndex := g.App.Config.GeminiConfig.CurrentKeyIndex + 1
+	g.App.Logger.Infof("🔧 创建 Gemini 客户端 (API Key %d/%d)...", keyIndex, keyCount)
+
 	client, err := NewGeminiClient(
-		g.App.Config.GeminiConfig.ApiKey,
+		apiKey,
 		g.App.Config.GeminiConfig.Model,
 		g.App.Config.GeminiConfig.Timeout,
 		g.App.Config.GeminiConfig.MaxTokens,
 	)
 	if err != nil {
 		g.App.Logger.Errorf("❌ 创建 Gemini 客户端失败: %v", err)
+		// 尝试轮换到下一个 API Key
+		if keyCount > 1 {
+			g.App.Config.GeminiConfig.RotateApiKey()
+			g.App.Logger.Infof("🔄 轮换到下一个 API Key...")
+		}
 		return false
 	}
 	defer client.Close()
@@ -514,6 +785,8 @@ func (g *GenerateMetadata) findVideoFiles() []string {
 		return videoFiles
 	}
 
+	g.App.Logger.Debugf("🔍 扫描目录: %s, 共 %d 个文件/文件夹", g.StateManager.CurrentDir, len(files))
+
 	for _, file := range files {
 		if file.IsDir() {
 			continue
@@ -524,10 +797,45 @@ func (g *GenerateMetadata) findVideoFiles() []string {
 			if ext == videoExt {
 				fullPath := filepath.Join(g.StateManager.CurrentDir, file.Name())
 				videoFiles = append(videoFiles, fullPath)
+				g.App.Logger.Debugf("✓ 找到视频文件: %s", file.Name())
 				break
 			}
 		}
 	}
 
+	if len(videoFiles) == 0 {
+		g.App.Logger.Debugf("⚠️ 目录中未找到视频文件")
+	} else {
+		g.App.Logger.Debugf("📹 共找到 %d 个视频文件", len(videoFiles))
+	}
+
 	return videoFiles
+}
+
+// logDirectoryContents 记录目录内容，帮助调试
+func (g *GenerateMetadata) logDirectoryContents() {
+	files, err := os.ReadDir(g.StateManager.CurrentDir)
+	if err != nil {
+		g.App.Logger.Errorf("❌ 无法读取工作目录: %v", err)
+		return
+	}
+
+	g.App.Logger.Infof("📂 工作目录文件列表 (%d 个):", len(files))
+	for _, file := range files {
+		if file.IsDir() {
+			g.App.Logger.Infof("   📁 [目录] %s", file.Name())
+		} else {
+			if info, err := file.Info(); err == nil {
+				sizeMB := float64(info.Size()) / 1024 / 1024
+				if sizeMB >= 1 {
+					g.App.Logger.Infof("   📄 %s (%.2f MB)", file.Name(), sizeMB)
+				} else {
+					sizeKB := float64(info.Size()) / 1024
+					g.App.Logger.Infof("   📄 %s (%.2f KB)", file.Name(), sizeKB)
+				}
+			} else {
+				g.App.Logger.Infof("   📄 %s", file.Name())
+			}
+		}
+	}
 }

@@ -21,8 +21,11 @@ type GeminiClient struct {
 }
 
 // NewGeminiClient 创建新的 Gemini 客户端
+// 注意：Gemini 原生 API 必须使用官方地址，不支持自定义代理（文件上传功能需要）
 func NewGeminiClient(apiKey string, model string, timeout int, maxTokens int) (*GeminiClient, error) {
 	ctx := context.Background()
+
+	// 使用官方 API 地址（不支持自定义代理，因为文件上传需要官方端点）
 	client, err := genai.NewClient(ctx, option.WithAPIKey(apiKey))
 	if err != nil {
 		return nil, fmt.Errorf("创建 Gemini 客户端失败: %v", err)
@@ -51,6 +54,27 @@ func NewGeminiClient(apiKey string, model string, timeout int, maxTokens int) (*
 // Close 关闭客户端
 func (g *GeminiClient) Close() error {
 	return g.client.Close()
+}
+
+// TestConnection 测试 Gemini API 连接和可用性
+func (g *GeminiClient) TestConnection(ctx context.Context) error {
+	// 使用一个简单的文本生成来测试连接
+	model := g.client.GenerativeModel(g.model)
+	model.SetMaxOutputTokens(50)
+	model.SetTemperature(0.1)
+
+	testPrompt := "请回复：OK"
+
+	resp, err := model.GenerateContent(ctx, genai.Text(testPrompt))
+	if err != nil {
+		return fmt.Errorf("API 调用失败: %v", err)
+	}
+
+	if len(resp.Candidates) == 0 || len(resp.Candidates[0].Content.Parts) == 0 {
+		return fmt.Errorf("API 返回空响应")
+	}
+
+	return nil
 }
 
 // UploadFile 上传文件到 Gemini

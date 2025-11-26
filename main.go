@@ -1,7 +1,16 @@
 package main
 
 import (
+	"context"
+	"log"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+
 	"github.com/difyz9/ytb2bili/internal/chain_task"
+	"github.com/difyz9/ytb2bili/internal/chain_task/handlers"
 	"github.com/difyz9/ytb2bili/internal/core"
 	"github.com/difyz9/ytb2bili/internal/core/services"
 	"github.com/difyz9/ytb2bili/internal/core/types"
@@ -12,18 +21,11 @@ import (
 	"github.com/difyz9/ytb2bili/pkg/logger"
 	"github.com/difyz9/ytb2bili/pkg/store"
 	"github.com/difyz9/ytb2bili/pkg/utils"
-	"context"
 	"github.com/gin-gonic/gin"
 	"github.com/robfig/cron/v3"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
-	"log"
-	"os"
-	"os/signal"
-	"strings"
-	"syscall"
-	"time"
 )
 
 // AppLifecycle 应用程序生命周期
@@ -40,6 +42,32 @@ func (l *AppLifecycle) OnStart(context.Context) error {
 func (l *AppLifecycle) OnStop(context.Context) error {
 	log.Println("AppLifecycle OnStop")
 	return nil
+}
+
+// testGeminiConnection 测试 Gemini API 连接
+func testGeminiConnection(config *types.AppConfig, logger *zap.SugaredLogger) error {
+	// 使用轮询 API Key
+	apiKey := config.GeminiConfig.GetCurrentApiKey()
+	keyCount := config.GeminiConfig.GetApiKeysCount()
+	if keyCount > 1 {
+		logger.Infof("│  🔑 使用 API Key 轮询 (%d 个密钥)", keyCount)
+	}
+
+	client, err := handlers.NewGeminiClient(
+		apiKey,
+		config.GeminiConfig.Model,
+		config.GeminiConfig.Timeout,
+		config.GeminiConfig.MaxTokens,
+	)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	return client.TestConnection(ctx)
 }
 
 func main() {
@@ -205,9 +233,139 @@ func main() {
 			}()
 		}),
 		// 注册生命周期回调函数
-		fx.Invoke(func(lifecycle fx.Lifecycle, lc *AppLifecycle) {
+		fx.Invoke(func(lifecycle fx.Lifecycle, lc *AppLifecycle, config *types.AppConfig, logger *zap.SugaredLogger) {
 			lifecycle.Append(fx.Hook{
 				OnStart: func(ctx context.Context) error {
+					// 显示 AI 服务配置状态
+					logger.Info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+					logger.Info("🤖 AI 服务配置检查")
+					logger.Info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+					// 1. 检查 OpenAI 兼容 API（用户首选）
+					if config.OpenAICompatibleConfig != nil && config.OpenAICompatibleConfig.Enabled && config.OpenAICompatibleConfig.ApiKey != "" {
+						providerName := "自定义API"
+						switch config.OpenAICompatibleConfig.Provider {
+						case "openai":
+							providerName = "OpenAI"
+						case "deepseek":
+							providerName = "DeepSeek (兼容模式)"
+						case "qwen":
+							providerName = "通义千问"
+						case "zhipu":
+							providerName = "智谱AI"
+						case "gemini":
+							providerName = "Gemini (代理)"
+						case "custom":
+							providerName = "自定义API"
+						}
+						logger.Info("┌─ 🌟 首选 AI 服务（用户配置）")
+						logger.Infof("│  📦 提供商: %s", providerName)
+						logger.Infof("│  🔧 模型: %s", config.OpenAICompatibleConfig.Model)
+						logger.Infof("│  🌐 API地址: %s", config.OpenAICompatibleConfig.BaseURL)
+						if len(config.OpenAICompatibleConfig.ApiKey) > 10 {
+							logger.Infof("│  🔑 API Key: %s...%s",
+								config.OpenAICompatibleConfig.ApiKey[:6],
+								config.OpenAICompatibleConfig.ApiKey[len(config.OpenAICompatibleConfig.ApiKey)-4:])
+						}
+						logger.Info("└─ ✅ 已启用为首选服务")
+					} else {
+						logger.Info("│  ⚪ OpenAI兼容API: 未配置")
+					}
+
+					// 2. 检查 DeepSeek
+					if config.DeepSeekTransConfig != nil && config.DeepSeekTransConfig.Enabled && config.DeepSeekTransConfig.ApiKey != "" {
+						logger.Info("┌─ 📘 DeepSeek 服务")
+						logger.Infof("│  🔧 模型: %s", config.DeepSeekTransConfig.Model)
+						if len(config.DeepSeekTransConfig.ApiKey) > 10 {
+							logger.Infof("│  🔑 API Key: %s...%s",
+								config.DeepSeekTransConfig.ApiKey[:6],
+								config.DeepSeekTransConfig.ApiKey[len(config.DeepSeekTransConfig.ApiKey)-4:])
+						}
+						if config.OpenAICompatibleConfig == nil || !config.OpenAICompatibleConfig.Enabled {
+							logger.Info("└─ ✅ 已启用为首选服务")
+						} else {
+							logger.Info("└─ ✅ 已启用为备选服务")
+						}
+					} else {
+						logger.Info("│  ⚪ DeepSeek: 未配置")
+					}
+
+					// 3. 检查 Gemini（原生多模态）
+					if config.GeminiConfig != nil && config.GeminiConfig.Enabled && config.GeminiConfig.ApiKey != "" {
+						logger.Info("┌─ 🔮 Gemini 原生多模态服务")
+						logger.Infof("│  🔧 模型: %s", config.GeminiConfig.Model)
+						if len(config.GeminiConfig.ApiKey) > 10 {
+							logger.Infof("│  🔑 API Key: %s...%s",
+								config.GeminiConfig.ApiKey[:6],
+								config.GeminiConfig.ApiKey[len(config.GeminiConfig.ApiKey)-4:])
+						}
+						logger.Infof("│  🎬 视频分析: %v", config.GeminiConfig.AnalyzeVideo)
+						logger.Infof("│  📝 用于元数据: %v", config.GeminiConfig.UseForMetadata)
+
+						// 测试 Gemini API 连接
+						logger.Info("│  🔄 测试连接...")
+						if err := testGeminiConnection(config, logger); err != nil {
+							logger.Warnf("│  ⚠️ 连接失败: %v", err)
+							logger.Info("└─ ❌ 服务不可用")
+						} else {
+							logger.Info("└─ ✅ 连接成功")
+						}
+					} else {
+						logger.Info("│  ⚪ Gemini原生: 未配置")
+					}
+
+					// 显示当前首选服务（用户选择）
+					logger.Info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+					primaryService := config.PrimaryAIService
+					if primaryService == "" {
+						// 如果用户未选择，自动选择第一个启用的服务
+						if config.OpenAICompatibleConfig != nil && config.OpenAICompatibleConfig.Enabled && config.OpenAICompatibleConfig.ApiKey != "" {
+							primaryService = "openai_compatible"
+						} else if config.DeepSeekTransConfig != nil && config.DeepSeekTransConfig.Enabled && config.DeepSeekTransConfig.ApiKey != "" {
+							primaryService = "deepseek"
+						} else if config.GeminiConfig != nil && config.GeminiConfig.Enabled && config.GeminiConfig.ApiKey != "" {
+							primaryService = "gemini"
+						}
+					}
+
+					// 显示翻译服务
+					switch primaryService {
+					case "openai_compatible":
+						providerName := "自定义API"
+						if config.OpenAICompatibleConfig != nil {
+							switch config.OpenAICompatibleConfig.Provider {
+							case "openai":
+								providerName = "OpenAI"
+							case "deepseek":
+								providerName = "DeepSeek (兼容模式)"
+							case "qwen":
+								providerName = "通义千问"
+							case "zhipu":
+								providerName = "智谱AI"
+							case "gemini":
+								providerName = "Gemini (代理)"
+							}
+						}
+						logger.Infof("🎯 翻译服务: %s (用户选择)", providerName)
+					case "deepseek":
+						logger.Info("🎯 翻译服务: DeepSeek (用户选择)")
+					case "gemini":
+						logger.Info("🎯 翻译服务: Gemini (用户选择)")
+					default:
+						logger.Warn("⚠️ 翻译服务: 未配置")
+						logger.Warn("💡 请在设置页面配置并选择首选 AI 服务")
+					}
+
+					// 显示元数据生成服务（固定使用 Gemini）
+					if config.GeminiConfig != nil && config.GeminiConfig.Enabled && config.GeminiConfig.ApiKey != "" {
+						logger.Infof("🎯 元数据生成: Gemini 原生多模态 (固定)")
+						logger.Infof("   视频分析: %v, 模型: %s", config.GeminiConfig.AnalyzeVideo, config.GeminiConfig.Model)
+					} else {
+						logger.Warn("⚠️ 元数据生成: 需要配置 Gemini！")
+						logger.Warn("💡 Gemini 具有多模态视频分析能力，是生成高质量元数据的最佳选择")
+					}
+					logger.Info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
 					return lc.OnStart(ctx)
 				},
 				OnStop: func(ctx context.Context) error {

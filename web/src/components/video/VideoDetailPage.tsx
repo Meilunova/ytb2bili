@@ -59,6 +59,27 @@ export default function VideoDetailPage({ videoId, onBack }: VideoDetailPageProp
     }
   };
 
+  const handleResetAllFailed = async () => {
+    try {
+      const response = await videoApi.resetAllFailedSteps(videoId);
+      if (response.code === 200 || response.code === 0) {
+        const data = response.data;
+        if (data && data.reset_count > 0) {
+          alert(`已重置 ${data.reset_count} 个失败步骤，任务将自动重新执行`);
+        } else {
+          alert('没有需要重置的失败步骤');
+        }
+        // 重新获取视频详情以更新状态
+        setTimeout(() => fetchVideoDetail(true), 1000);
+      } else {
+        alert(response.message || '重置失败');
+      }
+    } catch (err: any) {
+      console.error('重置失败步骤失败:', err);
+      alert('重置失败，请稍后再试');
+    }
+  };
+
   const handleRefresh = () => {
     fetchVideoDetail(true);
   };
@@ -244,6 +265,7 @@ export default function VideoDetailPage({ videoId, onBack }: VideoDetailPageProp
             <TaskStepList
               steps={video.task_steps}
               onRetryStep={handleRetryStep}
+              onResetAllFailed={handleResetAllFailed}
               isRetrying={refreshing}
             />
           </div>

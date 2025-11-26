@@ -1,17 +1,19 @@
 'use client';
 
 import { useState } from 'react';
-import { Play, RotateCcw, Clock, CheckCircle, XCircle, AlertCircle, Loader2 } from 'lucide-react';
+import { Play, RotateCcw, Clock, CheckCircle, XCircle, AlertCircle, Loader2, RefreshCw } from 'lucide-react';
 import { TaskStep, TaskStepStatus, TASK_STEP_STATUS_MAP, TASK_STEP_NAMES } from '@/types';
 
 interface TaskStepListProps {
   steps: TaskStep[];
   onRetryStep: (stepName: string) => Promise<void>;
+  onResetAllFailed?: () => Promise<void>;
   isRetrying?: boolean;
 }
 
-export default function TaskStepList({ steps, onRetryStep, isRetrying = false }: TaskStepListProps) {
+export default function TaskStepList({ steps, onRetryStep, onResetAllFailed, isRetrying = false }: TaskStepListProps) {
   const [retryingStep, setRetryingStep] = useState<string | null>(null);
+  const [isResettingAll, setIsResettingAll] = useState(false);
 
   const getStepIcon = (status: TaskStepStatus) => {
     const className = "w-5 h-5";
@@ -72,16 +74,56 @@ export default function TaskStepList({ steps, onRetryStep, isRetrying = false }:
     return step.can_retry && (step.status === 'failed' || step.status === 'skipped');
   };
 
+  // 检查是否有失败或跳过的步骤
+  const hasFailedSteps = steps.some(step => step.status === 'failed' || step.status === 'skipped');
+
+  // 处理一键重置所有失败步骤
+  const handleResetAllFailed = async () => {
+    if (!onResetAllFailed || isResettingAll || retryingStep) return;
+    
+    setIsResettingAll(true);
+    try {
+      await onResetAllFailed();
+    } finally {
+      setIsResettingAll(false);
+    }
+  };
+
   // 按步骤顺序排序
   const sortedSteps = [...steps].sort((a, b) => a.step_order - b.step_order);
 
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200">
       <div className="px-6 py-4 border-b border-gray-200">
-        <h3 className="text-lg font-semibold text-gray-900">任务步骤</h3>
-        <p className="text-sm text-gray-500 mt-1">
-          视频处理任务链的执行状态
-        </p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900">任务步骤</h3>
+            <p className="text-sm text-gray-500 mt-1">
+              视频处理任务链的执行状态
+            </p>
+          </div>
+          
+          {/* 一键重置所有失败步骤按钮 */}
+          {hasFailedSteps && onResetAllFailed && (
+            <button
+              onClick={handleResetAllFailed}
+              disabled={isResettingAll || retryingStep !== null || isRetrying}
+              className="inline-flex items-center px-4 py-2 border border-orange-300 shadow-sm text-sm font-medium rounded-lg text-orange-700 bg-orange-50 hover:bg-orange-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {isResettingAll ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  重置中...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                  一键重置失败任务
+                </>
+              )}
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="divide-y divide-gray-200">

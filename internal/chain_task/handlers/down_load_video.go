@@ -105,7 +105,7 @@ func (t *DownloadVideo) Execute(context map[string]interface{}) bool {
 
 	// 3. 尝试下载（先用代理，失败后不用代理重试）
 	videoURL := t.getVideoURL()
-	useProxy := t.App.Config != nil && t.App.Config.ProxyConfig != nil && 
+	useProxy := t.App.Config != nil && t.App.Config.ProxyConfig != nil &&
 		t.App.Config.ProxyConfig.UseProxy && t.App.Config.ProxyConfig.ProxyHost != ""
 
 	// 第一次尝试：使用代理（如果配置了）
@@ -154,7 +154,7 @@ func (t *DownloadVideo) executeDownload(ytdlpPath, videoURL string, useProxy boo
 	}
 
 	// 添加代理配置（如果需要）
-	if useProxy && t.App.Config != nil && t.App.Config.ProxyConfig != nil && 
+	if useProxy && t.App.Config != nil && t.App.Config.ProxyConfig != nil &&
 		t.App.Config.ProxyConfig.UseProxy && t.App.Config.ProxyConfig.ProxyHost != "" {
 		command = append(command, "--proxy", t.App.Config.ProxyConfig.ProxyHost)
 		t.App.Logger.Infof("📡 使用代理: %s", t.App.Config.ProxyConfig.ProxyHost)
@@ -196,14 +196,73 @@ func (t *DownloadVideo) executeDownload(ytdlpPath, videoURL string, useProxy boo
 		return false
 	}
 
-	// 实时读取输出
-	go t.logOutput(stdout, "INFO")
-	go t.logOutput(stderr, "ERROR")
+	// 收集错误输出
+	var errorOutput strings.Builder
+	var lastOutput strings.Builder
+
+	// 实时读取输出并收集错误信息
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			line := scanner.Text()
+			t.App.Logger.Debug(line)
+			lastOutput.WriteString(line + "\n")
+		}
+	}()
+
+	go func() {
+		scanner := bufio.NewScanner(stderr)
+		for scanner.Scan() {
+			line := scanner.Text()
+			t.App.Logger.Debug(line)
+			errorOutput.WriteString(line + "\n")
+			lastOutput.WriteString(line + "\n")
+		}
+	}()
 
 	// 等待命令完成
 	if err := cmd.Wait(); err != nil {
-		t.App.Logger.Errorf("❌ 视频下载失败: %v", err)
-		context["error"] = fmt.Sprintf("下载失败: %v", err)
+		// 构建详细的错误信息
+		errorMsg := fmt.Sprintf("下载失败: %v", err)
+
+		// 添加错误输出的最后几行
+		if errorOutput.Len() > 0 {
+			lines := strings.Split(strings.TrimSpace(errorOutput.String()), "\n")
+			if len(lines) > 0 {
+				// 取最后5行错误信息
+				startIdx := len(lines) - 5
+				if startIdx < 0 {
+					startIdx = 0
+				}
+				relevantErrors := strings.Join(lines[startIdx:], "\n")
+				errorMsg += "\n\n详细错误:\n" + relevantErrors
+			}
+		}
+
+		// 检查常见错误并给出建议
+		if strings.Contains(errorOutput.String(), "Sign in to confirm") ||
+			strings.Contains(errorOutput.String(), "not a bot") {
+			errorMsg += "\n\n💡 建议: 需要 cookies.txt 文件来绕过机器人验证"
+			errorMsg += "\n   请参考文档: docs/setup/cookies-setup.md"
+		} else if strings.Contains(errorOutput.String(), "HTTP Error 403") {
+			errorMsg += "\n\n💡 建议: 访问被拒绝，可能需要配置代理或更新 cookies"
+		} else if strings.Contains(errorOutput.String(), "HTTP Error 404") {
+			errorMsg += "\n\n💡 建议: 视频不存在或已被删除"
+		} else if strings.Contains(errorOutput.String(), "Private video") {
+			errorMsg += "\n\n💡 建议: 这是私有视频，无法下载"
+		} else if strings.Contains(errorOutput.String(), "Video unavailable") {
+			errorMsg += "\n\n💡 建议: 视频不可用，可能已被删除或设为私有"
+		}
+
+		t.App.Logger.Error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+		t.App.Logger.Errorf("❌ 视频下载失败")
+		t.App.Logger.Errorf("📹 视频ID: %s", t.StateManager.VideoID)
+		t.App.Logger.Errorf("🔗 视频URL: %s", videoURL)
+		t.App.Logger.Error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+		t.App.Logger.Error(errorMsg)
+		t.App.Logger.Error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+		context["error"] = errorMsg
 		return false
 	}
 
@@ -334,14 +393,14 @@ func (t *DownloadVideo) getVideoMetadata(ytdlpPath string) (*VideoMetadataInfo, 
 
 	// 构建基础命令参数
 	args := []string{"--dump-json", "--no-download"}
-	
+
 	// 添加 cookies 支持
 	configDir := filepath.Dir(t.App.Config.Path)
 	cookiesPath := filepath.Join(configDir, "cookies.txt")
 	if _, err := os.Stat(cookiesPath); err != nil {
 		cookiesPath = "cookies.txt"
 	}
-	
+
 	if _, err := os.Stat(cookiesPath); err == nil {
 		absPath, _ := filepath.Abs(cookiesPath)
 		args = append(args, "--cookies", absPath)
@@ -351,22 +410,22 @@ func (t *DownloadVideo) getVideoMetadata(ytdlpPath string) (*VideoMetadataInfo, 
 		args = append(args, "--cookies-from-browser", "chrome")
 		t.App.Logger.Debug("🍪 从 Chrome 浏览器读取 cookies 获取元数据")
 	}
-	
+
 	// 尝试使用代理
-	useProxy := t.App.Config != nil && t.App.Config.ProxyConfig != nil && 
+	useProxy := t.App.Config != nil && t.App.Config.ProxyConfig != nil &&
 		t.App.Config.ProxyConfig.UseProxy && t.App.Config.ProxyConfig.ProxyHost != ""
-	
+
 	if useProxy {
 		args = append(args, "--proxy", t.App.Config.ProxyConfig.ProxyHost)
 		t.App.Logger.Debugf("📡 使用代理获取元数据: %s", t.App.Config.ProxyConfig.ProxyHost)
 	}
-	
+
 	args = append(args, videoURL)
-	
+
 	// 第一次尝试（可能带代理）
 	cmd := exec.Command(ytdlpPath, args...)
 	output, err := cmd.Output()
-	
+
 	// 如果使用代理失败，尝试不使用代理
 	if err != nil && useProxy {
 		t.App.Logger.Warnf("⚠️ 使用代理获取元数据失败，尝试不使用代理...")

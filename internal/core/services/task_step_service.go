@@ -255,3 +255,34 @@ func (s *TaskStepService) DeleteTaskStepsByVideoID(videoID string) error {
 	}
 	return nil
 }
+
+// ResetFailedSteps 重置指定视频的所有失败/跳过步骤为待执行状态
+// 返回被重置的步骤数量
+func (s *TaskStepService) ResetFailedSteps(videoID string) (int64, error) {
+	updates := map[string]interface{}{
+		"status":     model.TaskStepStatusPending,
+		"start_time": nil,
+		"end_time":   nil,
+		"duration":   0,
+		"error_msg":  "",
+	}
+
+	result := s.DB.Model(&model.TaskStep{}).
+		Where("video_id = ? AND status IN ?", videoID, []string{model.TaskStepStatusFailed, model.TaskStepStatusSkipped}).
+		Updates(updates)
+
+	if result.Error != nil {
+		return 0, fmt.Errorf("重置失败步骤失败: %v", result.Error)
+	}
+
+	return result.RowsAffected, nil
+}
+
+// GetFailedOrSkippedSteps 获取指定视频的所有失败或跳过的步骤
+func (s *TaskStepService) GetFailedOrSkippedSteps(videoID string) ([]model.TaskStep, error) {
+	var steps []model.TaskStep
+	err := s.DB.Where("video_id = ? AND status IN ?", videoID, []string{model.TaskStepStatusFailed, model.TaskStepStatusSkipped}).
+		Order("step_order ASC").
+		Find(&steps).Error
+	return steps, err
+}
