@@ -91,8 +91,10 @@ func (g *GenerateMetadata) Execute(context map[string]interface{}) bool {
 	g.AIManager.RefreshConfig(g.App.Config)
 
 	// ⚠️ 元数据生成必须使用 Gemini（多模态视频分析能力）
-	// 检查 Gemini 是否已配置
-	if g.App.Config.GeminiConfig == nil || !g.App.Config.GeminiConfig.Enabled || g.App.Config.GeminiConfig.ApiKey == "" {
+	// 检查 Gemini 是否已配置（支持单个 ApiKey 或多个 ApiKeys）
+	geminiConfigured := g.App.Config.GeminiConfig != nil && g.App.Config.GeminiConfig.Enabled &&
+		(g.App.Config.GeminiConfig.ApiKey != "" || len(g.App.Config.GeminiConfig.ApiKeys) > 0)
+	if !geminiConfigured {
 		g.App.Logger.Error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 		g.App.Logger.Error("❌ 元数据生成需要配置 Gemini 服务！")
 		g.App.Logger.Error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")

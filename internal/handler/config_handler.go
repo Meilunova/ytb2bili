@@ -2,15 +2,19 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/difyz9/ytb2bili/internal/core"
 	"github.com/difyz9/ytb2bili/internal/core/types"
+	"github.com/google/generative-ai-go/genai"
+	"google.golang.org/api/option"
 
 	"github.com/gin-gonic/gin"
 )
@@ -49,6 +53,8 @@ func (h *ConfigHandler) RegisterRoutes(server *core.AppServer) {
 		// Gemini原生配置（用于元数据生成）
 		config.GET("/gemini", h.getGeminiConfig)
 		config.PUT("/gemini", h.updateGeminiConfig)
+		config.POST("/gemini/validate", h.validateGeminiApiKeys)
+		config.GET("/gemini/models", h.getGeminiModels)
 	}
 }
 
@@ -776,7 +782,7 @@ func (h *ConfigHandler) getAIServicesStatus(c *gin.Context) {
 
 	// 3. Gemini（原生）
 	geminiConfig := h.App.Config.GeminiConfig
-	geminiEnabled := geminiConfig != nil && geminiConfig.Enabled && geminiConfig.ApiKey != ""
+	geminiEnabled := geminiConfig != nil && geminiConfig.Enabled && (geminiConfig.ApiKey != "" || len(geminiConfig.ApiKeys) > 0)
 	geminiService := AIServiceStatusResponse{
 		Provider:  "gemini",
 		Name:      "Gemini（原生多模态）",
@@ -860,7 +866,7 @@ func (h *ConfigHandler) setPrimaryAIService(c *gin.Context) {
 		isEnabled = cfg != nil && cfg.Enabled && cfg.ApiKey != ""
 	case "gemini":
 		cfg := h.App.Config.GeminiConfig
-		isEnabled = cfg != nil && cfg.Enabled && cfg.ApiKey != ""
+		isEnabled = cfg != nil && cfg.Enabled && (cfg.ApiKey != "" || len(cfg.ApiKeys) > 0)
 	}
 
 	if !isEnabled {
@@ -900,8 +906,9 @@ func (h *ConfigHandler) setPrimaryAIService(c *gin.Context) {
 // GeminiConfigRequest Gemini配置请求
 type GeminiConfigRequest struct {
 	Enabled           *bool    `json:"enabled,omitempty"`
-	ApiKey            *string  `json:"api_key,omitempty"`  // 单个 API Key（兼容旧配置）
-	ApiKeys           []string `json:"api_keys,omitempty"` // 多个 API Key（用于轮询）
+	ApiKey            *string  `json:"api_key,omitempty"`        // 单个 API Key（兼容旧配置）
+	ApiKeys           []string `json:"api_keys,omitempty"`       // 多个 API Key（用于轮询）
+	ClearApiKeys      *bool    `json:"clear_api_keys,omitempty"` // 是否清空所有 API Keys
 	Model             *string  `json:"model,omitempty"`
 	Timeout           *int     `json:"timeout,omitempty"`
 	MaxTokens         *int     `json:"max_tokens,omitempty"`
@@ -1020,7 +1027,12 @@ func (h *ConfigHandler) updateGeminiConfig(c *gin.Context) {
 	if req.ApiKey != nil {
 		config.ApiKey = *req.ApiKey
 	}
-	if len(req.ApiKeys) > 0 {
+	// 处理清空 API Keys 的请求
+	if req.ClearApiKeys != nil && *req.ClearApiKeys {
+		config.ApiKeys = []string{}
+		config.ApiKey = ""
+		h.App.Logger.Info("🗑️ Clearing all Gemini API Keys")
+	} else if len(req.ApiKeys) > 0 {
 		config.ApiKeys = req.ApiKeys
 	}
 	if req.Model != nil {
@@ -1079,6 +1091,180 @@ func (h *ConfigHandler) updateGeminiConfig(c *gin.Context) {
 			UseForMetadata:    config.UseForMetadata,
 			AnalyzeVideo:      config.AnalyzeVideo,
 			VideoSampleFrames: config.VideoSampleFrames,
+		},
+	})
+}
+
+// ========== Gemini API Key 验证 ==========
+
+// ApiKeyValidationResult 单个 API Key 的验证结果
+type ApiKeyValidationResult struct {
+	Key     string `json:"key"`     // 脱敏后的 Key
+	Index   int    `json:"index"`   // Key 的索引
+	Valid   bool   `json:"valid"`   // 是否有效
+	Message string `json:"message"` // 验证消息
+}
+
+// ValidateGeminiApiKeysResponse 验证响应
+type ValidateGeminiApiKeysResponse struct {
+	TotalKeys   int                      `json:"total_keys"`   // 总 Key 数量
+	ValidKeys   int                      `json:"valid_keys"`   // 有效 Key 数量
+	InvalidKeys int                      `json:"invalid_keys"` // 无效 Key 数量
+	Results     []ApiKeyValidationResult `json:"results"`      // 每个 Key 的验证结果
+	AutoRemoved int                      `json:"auto_removed"` // 自动移除的无效 Key 数量
+}
+
+// validateGeminiApiKeys 验证所有 Gemini API Keys
+func (h *ConfigHandler) validateGeminiApiKeys(c *gin.Context) {
+	config := h.App.Config.GeminiConfig
+	if config == nil || len(config.ApiKeys) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"code":    200,
+			"message": "No API Keys configured",
+			"data": ValidateGeminiApiKeysResponse{
+				TotalKeys:   0,
+				ValidKeys:   0,
+				InvalidKeys: 0,
+				Results:     []ApiKeyValidationResult{},
+			},
+		})
+		return
+	}
+
+	h.App.Logger.Info("🔍 开始验证 Gemini API Keys...")
+
+	// 并发验证所有 API Keys
+	var wg sync.WaitGroup
+	results := make([]ApiKeyValidationResult, len(config.ApiKeys))
+
+	for i, apiKey := range config.ApiKeys {
+		wg.Add(1)
+		go func(index int, key string) {
+			defer wg.Done()
+
+			result := ApiKeyValidationResult{
+				Key:   maskApiKey(key),
+				Index: index,
+			}
+
+			// 创建临时客户端测试连接
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+
+			client, err := genai.NewClient(ctx, option.WithAPIKey(key))
+			if err != nil {
+				result.Valid = false
+				result.Message = fmt.Sprintf("创建客户端失败: %v", err)
+				results[index] = result
+				return
+			}
+			defer client.Close()
+
+			// 测试 API 调用
+			model := client.GenerativeModel(config.Model)
+			model.SetMaxOutputTokens(10)
+			model.SetTemperature(0.1)
+
+			_, err = model.GenerateContent(ctx, genai.Text("Hi"))
+			if err != nil {
+				result.Valid = false
+				errMsg := err.Error()
+				if strings.Contains(errMsg, "leaked") {
+					result.Message = "⚠️ API Key 已泄露，请更换"
+				} else if strings.Contains(errMsg, "invalid") || strings.Contains(errMsg, "API key not valid") {
+					result.Message = "❌ API Key 无效"
+				} else if strings.Contains(errMsg, "quota") {
+					result.Message = "⚠️ 配额已用尽"
+				} else if strings.Contains(errMsg, "403") {
+					result.Message = "❌ 访问被拒绝: " + errMsg
+				} else {
+					result.Message = "❌ 验证失败: " + errMsg
+				}
+			} else {
+				result.Valid = true
+				result.Message = "✅ 有效"
+			}
+
+			results[index] = result
+		}(i, apiKey)
+	}
+
+	wg.Wait()
+
+	// 统计结果
+	validCount := 0
+	invalidCount := 0
+	for _, r := range results {
+		if r.Valid {
+			validCount++
+		} else {
+			invalidCount++
+		}
+	}
+
+	h.App.Logger.Infof("🔍 Gemini API Keys 验证完成: %d 有效, %d 无效", validCount, invalidCount)
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    200,
+		"message": fmt.Sprintf("验证完成: %d 有效, %d 无效", validCount, invalidCount),
+		"data": ValidateGeminiApiKeysResponse{
+			TotalKeys:   len(config.ApiKeys),
+			ValidKeys:   validCount,
+			InvalidKeys: invalidCount,
+			Results:     results,
+			AutoRemoved: 0,
+		},
+	})
+}
+
+// getGeminiModels 获取 Gemini 可用模型列表
+func (h *ConfigHandler) getGeminiModels(c *gin.Context) {
+	config := h.App.Config.GeminiConfig
+	if config == nil || len(config.ApiKeys) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": "No API Keys configured",
+		})
+		return
+	}
+
+	// 使用第一个 API Key 获取模型列表
+	apiKey := config.ApiKeys[0]
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	client, err := genai.NewClient(ctx, option.WithAPIKey(apiKey))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    500,
+			"message": "创建客户端失败: " + err.Error(),
+		})
+		return
+	}
+	defer client.Close()
+
+	// 获取模型列表
+	iter := client.ListModels(ctx)
+	var models []string
+	for {
+		m, err := iter.Next()
+		if err != nil {
+			break
+		}
+		// 只返回支持生成内容的模型
+		if strings.Contains(m.Name, "gemini") {
+			// 提取模型名称（去掉 "models/" 前缀）
+			modelName := strings.TrimPrefix(m.Name, "models/")
+			models = append(models, modelName)
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    200,
+		"message": "success",
+		"data": gin.H{
+			"models": models,
 		},
 	})
 }

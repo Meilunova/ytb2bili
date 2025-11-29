@@ -13,7 +13,9 @@ import {
   Globe,
   Key,
   Clock,
-  Thermometer
+  Thermometer,
+  Trash2,
+  RefreshCw
 } from 'lucide-react';
 
 // 提供商信息接口
@@ -124,6 +126,15 @@ export default function AIModelSettings() {
   const [geminiApiKeysInput, setGeminiApiKeysInput] = useState(''); // 多个 API Key，用换行分隔
   const [geminiHasChanges, setGeminiHasChanges] = useState(false);
   const [geminiSaving, setGeminiSaving] = useState(false);
+  const [geminiClearing, setGeminiClearing] = useState(false);
+  const [geminiRefreshing, setGeminiRefreshing] = useState(false);
+  const [geminiValidating, setGeminiValidating] = useState(false);
+  const [geminiValidationResults, setGeminiValidationResults] = useState<{
+    total_keys: number;
+    valid_keys: number;
+    invalid_keys: number;
+    results: Array<{key: string; index: number; valid: boolean; message: string}>;
+  } | null>(null);
 
   // 加载配置
   const loadConfig = useCallback(async () => {
@@ -383,6 +394,91 @@ export default function AIModelSettings() {
     }
   };
 
+  // 清空Gemini API Keys
+  const clearGeminiApiKeys = async () => {
+    if (!confirm('确定要清空所有 Gemini API Keys 吗？此操作不可恢复。')) {
+      return;
+    }
+    
+    setGeminiClearing(true);
+    try {
+      const apiBaseUrl = getApiBaseUrl();
+      const response = await fetch(`${apiBaseUrl}/api/v1/config/gemini`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          api_keys: [], // 发送空数组来清空
+          clear_api_keys: true, // 明确标记要清空
+        }),
+      });
+      
+      const data = await response.json();
+      if (data.code === 200) {
+        setGeminiConfig(data.data);
+        setGeminiApiKeysInput('');
+        // 刷新服务状态
+        await loadServicesStatus();
+        alert('已清空所有 Gemini API Keys');
+      } else {
+        alert('清空失败: ' + data.message);
+      }
+    } catch (error) {
+      console.error('清空Gemini API Keys失败:', error);
+      alert('清空失败，请检查网络连接');
+    } finally {
+      setGeminiClearing(false);
+    }
+  };
+
+  // 刷新Gemini可用模型列表
+  const refreshGeminiModels = async () => {
+    setGeminiRefreshing(true);
+    try {
+      const apiBaseUrl = getApiBaseUrl();
+      const response = await fetch(`${apiBaseUrl}/api/v1/config/gemini/models`);
+      const data = await response.json();
+      if (data.code === 200 && data.data?.models) {
+        alert(`可用模型: ${data.data.models.join(', ')}`);
+      } else {
+        alert('获取模型列表失败: ' + (data.message || '未知错误'));
+      }
+    } catch (error) {
+      console.error('获取Gemini模型列表失败:', error);
+      alert('获取失败，请检查网络连接或 API Key 是否有效');
+    } finally {
+      setGeminiRefreshing(false);
+    }
+  };
+
+  // 验证Gemini API Keys
+  const validateGeminiApiKeys = async () => {
+    setGeminiValidating(true);
+    setGeminiValidationResults(null);
+    try {
+      const apiBaseUrl = getApiBaseUrl();
+      const response = await fetch(`${apiBaseUrl}/api/v1/config/gemini/validate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await response.json();
+      if (data.code === 200 && data.data) {
+        setGeminiValidationResults(data.data);
+        if (data.data.invalid_keys > 0) {
+          alert(`验证完成！\n✅ 有效: ${data.data.valid_keys} 个\n❌ 无效: ${data.data.invalid_keys} 个\n\n建议清除无效的 API Key`);
+        } else {
+          alert(`验证完成！所有 ${data.data.valid_keys} 个 API Key 均有效 ✅`);
+        }
+      } else {
+        alert('验证失败: ' + (data.message || '未知错误'));
+      }
+    } catch (error) {
+      console.error('验证Gemini API Keys失败:', error);
+      alert('验证失败，请检查网络连接');
+    } finally {
+      setGeminiValidating(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center p-8">
@@ -543,13 +639,79 @@ export default function AIModelSettings() {
                 <p className="text-xs text-gray-500">
                   从 <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-purple-600 hover:underline">Google AI Studio</a> 获取，每行一个 Key
                 </p>
-                {geminiConfig.api_keys_count > 0 && (
-                  <span className="text-xs text-purple-600 font-medium">
-                    已配置 {geminiConfig.api_keys_count} 个 Key
-                  </span>
-                )}
+                <div className="flex items-center space-x-2">
+                  {geminiConfig.api_keys_count > 0 && (
+                    <>
+                      <span className="text-xs text-purple-600 font-medium">
+                        已配置 {geminiConfig.api_keys_count} 个 Key
+                      </span>
+                      <button
+                        onClick={validateGeminiApiKeys}
+                        disabled={geminiValidating}
+                        className="flex items-center px-2 py-1 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded transition-colors disabled:opacity-50"
+                        title="验证所有 API Keys 的有效性"
+                      >
+                        {geminiValidating ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <TestTube className="w-3 h-3" />
+                        )}
+                        <span className="ml-1">验证</span>
+                      </button>
+                      <button
+                        onClick={clearGeminiApiKeys}
+                        disabled={geminiClearing}
+                        className="flex items-center px-2 py-1 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 rounded transition-colors disabled:opacity-50"
+                        title="清空所有 API Keys"
+                      >
+                        {geminiClearing ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <Trash2 className="w-3 h-3" />
+                        )}
+                        <span className="ml-1">清空</span>
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
+
+            {/* API Key 验证结果 */}
+            {geminiValidationResults && (
+              <div className={`rounded-md p-3 ${
+                geminiValidationResults.invalid_keys > 0 
+                  ? 'bg-red-50 border border-red-200' 
+                  : 'bg-green-50 border border-green-200'
+              }`}>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium">
+                    验证结果: {geminiValidationResults.valid_keys}/{geminiValidationResults.total_keys} 有效
+                  </span>
+                  <button
+                    onClick={() => setGeminiValidationResults(null)}
+                    className="text-gray-400 hover:text-gray-600"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="space-y-1">
+                  {geminiValidationResults.results.map((result, idx) => (
+                    <div key={idx} className={`text-xs flex items-center space-x-2 ${
+                      result.valid ? 'text-green-700' : 'text-red-700'
+                    }`}>
+                      {result.valid ? (
+                        <Check className="w-3 h-3" />
+                      ) : (
+                        <X className="w-3 h-3" />
+                      )}
+                      <span className="font-mono">{result.key}</span>
+                      <span>{result.message}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* 官方 API 说明 */}
             <div className="bg-amber-50 border border-amber-200 rounded-md p-3">
@@ -564,13 +726,28 @@ export default function AIModelSettings() {
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 模型名称
               </label>
-              <input
-                type="text"
-                value={geminiConfig.model}
-                onChange={(e) => updateGeminiConfig('model', e.target.value)}
-                placeholder="gemini-2.0-flash"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500"
-              />
+              <div className="flex space-x-2">
+                <input
+                  type="text"
+                  value={geminiConfig.model}
+                  onChange={(e) => updateGeminiConfig('model', e.target.value)}
+                  placeholder="gemini-2.5-flash"
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500"
+                />
+                <button
+                  onClick={refreshGeminiModels}
+                  disabled={geminiRefreshing || geminiConfig.api_keys_count === 0}
+                  className="flex items-center px-3 py-2 border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="从 Gemini API 获取可用模型列表"
+                >
+                  {geminiRefreshing ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-gray-500" />
+                  ) : (
+                    <RefreshCw className="w-4 h-4 text-gray-500" />
+                  )}
+                </button>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">点击刷新按钮从 Gemini API 获取可用模型列表</p>
             </div>
 
             {/* 视频分析开关 */}

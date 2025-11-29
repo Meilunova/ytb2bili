@@ -108,18 +108,21 @@ export default function TaskQueueStats({ onVideoSelect }: TaskQueueStatsProps) {
     }
   };
 
-  const handleResetAllFailed = async (videoId: number) => {
+  const handleResetAllFailed = async (videoId: number, resetAll: boolean = false) => {
     try {
-      const response = await fetch(`/api/v1/videos/${videoId}/steps/reset-failed`, {
+      const endpoint = resetAll 
+        ? `/api/v1/videos/${videoId}/steps/reset-all`
+        : `/api/v1/videos/${videoId}/steps/reset-failed`;
+      const response = await fetch(endpoint, {
         method: 'POST',
       });
       const data = await response.json();
       if (data.code === 200 || data.code === 0) {
         const resetCount = data.data?.reset_count || 0;
         if (resetCount > 0) {
-          alert(`已重置 ${resetCount} 个失败步骤，任务将自动重新执行`);
+          alert(`已重置 ${resetCount} 个步骤，任务将自动重新执行`);
         } else {
-          alert('没有需要重置的失败步骤');
+          alert('没有需要重置的步骤');
         }
         // 刷新详情和列表
         handleToggleDetails(videoId);
@@ -128,7 +131,7 @@ export default function TaskQueueStats({ onVideoSelect }: TaskQueueStatsProps) {
         alert(`重置失败：${data.message}`);
       }
     } catch (error) {
-      console.error('Error resetting failed steps:', error);
+      console.error('Error resetting steps:', error);
       alert('网络错误，重置失败');
     }
   };
@@ -387,7 +390,7 @@ export default function TaskQueueStats({ onVideoSelect }: TaskQueueStatsProps) {
                           <TaskStepDetail 
                             steps={detailedVideo.task_steps} 
                             onRetry={(stepName) => handleRetryStep(video.id, stepName)}
-                            onResetAllFailed={() => handleResetAllFailed(video.id)}
+                            onResetAllFailed={(resetAll) => handleResetAllFailed(video.id, resetAll)}
                           />
                         ) : (
                           <div className="text-center text-gray-500">无任务步骤信息</div>
@@ -517,7 +520,7 @@ export default function TaskQueueStats({ onVideoSelect }: TaskQueueStatsProps) {
   );
 }
 
-const TaskStepDetail = ({ steps, onRetry, onResetAllFailed }: { steps: TaskStep[], onRetry: (stepName: string) => void, onResetAllFailed?: () => void }) => {
+const TaskStepDetail = ({ steps, onRetry, onResetAllFailed }: { steps: TaskStep[], onRetry: (stepName: string) => void, onResetAllFailed?: (resetAll: boolean) => void }) => {
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'completed':
@@ -541,13 +544,17 @@ const TaskStepDetail = ({ steps, onRetry, onResetAllFailed }: { steps: TaskStep[
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <h5 className="font-semibold text-gray-800">任务步骤</h5>
-        {hasFailedSteps && onResetAllFailed && (
+        {onResetAllFailed && (
           <button
-            onClick={onResetAllFailed}
-            className="inline-flex items-center px-3 py-1.5 text-sm font-medium text-orange-700 bg-orange-50 border border-orange-300 rounded-lg hover:bg-orange-100 transition-colors"
+            onClick={() => onResetAllFailed(!hasFailedSteps)}
+            className={`inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+              hasFailedSteps 
+                ? 'text-orange-700 bg-orange-50 border border-orange-300 hover:bg-orange-100' 
+                : 'text-blue-700 bg-blue-50 border border-blue-300 hover:bg-blue-100'
+            }`}
           >
             <RotateCcw className="w-4 h-4 mr-1.5" />
-            一键重置失败任务
+            {hasFailedSteps ? '一键重置失败任务' : '重置任务'}
           </button>
         )}
       </div>

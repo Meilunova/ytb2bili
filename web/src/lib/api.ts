@@ -100,6 +100,11 @@ export const videoApi = {
     return api.post(`/videos/${videoId}/steps/reset-failed`);
   },
 
+  // 重置所有任务步骤（不仅仅是失败的）
+  resetAllSteps: (videoId: string): Promise<ApiResponse<{ reset_count: number; reset_steps: string[] }>> => {
+    return api.post(`/videos/${videoId}/steps/reset-all`);
+  },
+
   // 提交新视频
   submitVideo: (data: VideoSubmissionRequest): Promise<ApiResponse<Video>> => {
     return api.post('/submit', data);

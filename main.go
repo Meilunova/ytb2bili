@@ -291,14 +291,12 @@ func main() {
 					}
 
 					// 3. 检查 Gemini（原生多模态）
-					if config.GeminiConfig != nil && config.GeminiConfig.Enabled && config.GeminiConfig.ApiKey != "" {
+					geminiHasKey := config.GeminiConfig != nil && config.GeminiConfig.Enabled &&
+						(config.GeminiConfig.ApiKey != "" || len(config.GeminiConfig.ApiKeys) > 0)
+					if geminiHasKey {
 						logger.Info("┌─ 🔮 Gemini 原生多模态服务")
 						logger.Infof("│  🔧 模型: %s", config.GeminiConfig.Model)
-						if len(config.GeminiConfig.ApiKey) > 10 {
-							logger.Infof("│  🔑 API Key: %s...%s",
-								config.GeminiConfig.ApiKey[:6],
-								config.GeminiConfig.ApiKey[len(config.GeminiConfig.ApiKey)-4:])
-						}
+						logger.Infof("│  🔑 使用 API Key 轮询 (%d 个密钥)", config.GeminiConfig.GetApiKeysCount())
 						logger.Infof("│  🎬 视频分析: %v", config.GeminiConfig.AnalyzeVideo)
 						logger.Infof("│  📝 用于元数据: %v", config.GeminiConfig.UseForMetadata)
 
@@ -323,7 +321,8 @@ func main() {
 							primaryService = "openai_compatible"
 						} else if config.DeepSeekTransConfig != nil && config.DeepSeekTransConfig.Enabled && config.DeepSeekTransConfig.ApiKey != "" {
 							primaryService = "deepseek"
-						} else if config.GeminiConfig != nil && config.GeminiConfig.Enabled && config.GeminiConfig.ApiKey != "" {
+						} else if config.GeminiConfig != nil && config.GeminiConfig.Enabled &&
+							(config.GeminiConfig.ApiKey != "" || len(config.GeminiConfig.ApiKeys) > 0) {
 							primaryService = "gemini"
 						}
 					}
@@ -357,7 +356,7 @@ func main() {
 					}
 
 					// 显示元数据生成服务（固定使用 Gemini）
-					if config.GeminiConfig != nil && config.GeminiConfig.Enabled && config.GeminiConfig.ApiKey != "" {
+					if geminiHasKey {
 						logger.Infof("🎯 元数据生成: Gemini 原生多模态 (固定)")
 						logger.Infof("   视频分析: %v, 模型: %s", config.GeminiConfig.AnalyzeVideo, config.GeminiConfig.Model)
 					} else {

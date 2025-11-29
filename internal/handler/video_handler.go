@@ -54,6 +54,7 @@ func (h *VideoHandler) RegisterRoutes(api *gin.RouterGroup) {
 		video.POST("/:id/upload/video", h.manualUploadVideo)
 		video.POST("/:id/upload/subtitle", h.manualUploadSubtitle)
 		video.POST("/:id/steps/reset-failed", h.resetAllFailedSteps)
+		video.POST("/:id/steps/reset-all", h.resetAllSteps)
 	}
 }
 
@@ -683,6 +684,74 @@ func (h *VideoHandler) resetAllFailedSteps(c *gin.Context) {
 			"reset_count": resetCount,
 			"reset_steps": stepNames,
 			"message":     "任务已重置，将在下次调度时重新执行",
+		},
+	})
+}
+
+// resetAllSteps 重置所有任务步骤（不仅仅是失败的）
+func (h *VideoHandler) resetAllSteps(c *gin.Context) {
+	idStr := c.Param("id")
+
+	// 尝试解析为数字ID，如果失败则当作video_id处理
+	var savedVideo *model.SavedVideo
+	var err error
+
+	if id, parseErr := strconv.ParseUint(idStr, 10, 32); parseErr == nil {
+		savedVideo, err = h.SavedVideoService.GetByID(uint(id))
+	} else {
+		savedVideo, err = h.SavedVideoService.GetVideoByVideoID(idStr)
+	}
+
+	if err != nil {
+		h.App.Logger.Errorf("获取视频详情失败: %v", err)
+		c.JSON(http.StatusNotFound, VideoListResponse{
+			Code:    404,
+			Message: "视频不存在",
+		})
+		return
+	}
+
+	// 获取所有步骤
+	steps, err := h.TaskStepService.GetTaskStepsByVideoID(savedVideo.VideoID)
+	if err != nil || len(steps) == 0 {
+		c.JSON(http.StatusOK, VideoListResponse{
+			Code:    200,
+			Message: "没有任务步骤",
+			Data: gin.H{
+				"video_id":    savedVideo.VideoID,
+				"reset_count": 0,
+			},
+		})
+		return
+	}
+
+	// 重置所有步骤
+	var stepNames []string
+	resetCount := 0
+	for _, step := range steps {
+		if err := h.TaskStepService.ResetTaskStep(savedVideo.VideoID, step.StepName); err != nil {
+			h.App.Logger.Warnf("重置步骤 %s 失败: %v", step.StepName, err)
+		} else {
+			stepNames = append(stepNames, step.StepName)
+			resetCount++
+		}
+	}
+
+	// 同时重置视频状态为待处理
+	if err := h.SavedVideoService.UpdateVideoStatus([]uint{savedVideo.ID}, "001"); err != nil {
+		h.App.Logger.Warnf("重置视频状态失败: %v", err)
+	}
+
+	h.App.Logger.Infof("🔄 用户请求重置所有步骤: %s - 已重置 %d 个步骤", savedVideo.VideoID, resetCount)
+
+	c.JSON(http.StatusOK, VideoListResponse{
+		Code:    200,
+		Message: fmt.Sprintf("已重置 %d 个步骤", resetCount),
+		Data: gin.H{
+			"video_id":    savedVideo.VideoID,
+			"reset_count": resetCount,
+			"reset_steps": stepNames,
+			"message":     "所有任务已重置，将在下次调度时重新执行",
 		},
 	})
 }
