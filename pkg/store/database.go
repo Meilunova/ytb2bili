@@ -1,10 +1,11 @@
 package store
 
 import (
-	"github.com/difyz9/ytb2bili/internal/core/types"
-	"github.com/difyz9/ytb2bili/pkg/store/model"
 	"fmt"
 	"time"
+
+	"github.com/difyz9/ytb2bili/internal/core/types"
+	"github.com/difyz9/ytb2bili/pkg/store/model"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
@@ -85,5 +86,7 @@ func AutoMigrate(db *gorm.DB) error {
 	return db.AutoMigrate(
 		&model.User{},
 		&model.SavedVideo{},
+		&model.App{},
+		&model.UserToken{},
 	)
 }

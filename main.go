@@ -9,12 +9,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/difyz9/ytb2bili/internal/auth"
 	"github.com/difyz9/ytb2bili/internal/chain_task"
 	"github.com/difyz9/ytb2bili/internal/chain_task/handlers"
 	"github.com/difyz9/ytb2bili/internal/core"
 	"github.com/difyz9/ytb2bili/internal/core/services"
 	"github.com/difyz9/ytb2bili/internal/core/types"
 	"github.com/difyz9/ytb2bili/internal/handler"
+	"github.com/difyz9/ytb2bili/internal/membership"
 	"github.com/difyz9/ytb2bili/internal/web"
 	"github.com/difyz9/ytb2bili/pkg/analytics"
 	"github.com/difyz9/ytb2bili/pkg/cos"
@@ -130,6 +132,20 @@ func main() {
 		fx.Provide(services.NewSavedVideoService),
 		fx.Provide(services.NewTaskStepService),
 
+		// 认证系统
+		fx.Provide(func() *auth.JWTService {
+			return auth.NewJWTService(auth.DefaultJWTConfig())
+		}),
+		fx.Provide(auth.NewAuthMiddleware),
+		fx.Provide(auth.NewAuthHandler),
+
+		// 会员系统
+		fx.Provide(func(db *gorm.DB) membership.MembershipStore {
+			return membership.NewDBMembershipStore(db)
+		}),
+		fx.Provide(membership.NewMembershipHandler),
+		fx.Provide(membership.NewMembershipMiddleware),
+
 		// 注册cron
 		fx.Provide(func() *cron.Cron {
 			return cron.New(cron.WithSeconds())
@@ -180,6 +196,9 @@ func main() {
 			uploadScheduler *chain_task.UploadScheduler,
 			analyticsMiddleware *analytics.Middleware,
 			analyticsClient *analytics.Client,
+			membershipHandler *membership.MembershipHandler,
+			authHandler *auth.AuthHandler,
+			authMiddleware *auth.AuthMiddleware,
 		) {
 			// 初始化服务器
 			server.Init(db)
@@ -191,7 +210,7 @@ func main() {
 			}
 
 			// 注册所有 Handler 路由（包括连接 VideoHandler 和 UploadScheduler）
-			registerHandlers(server, logger, savedVideoService, taskStepService, uploadScheduler, analyticsClient)
+			registerHandlers(server, logger, savedVideoService, taskStepService, uploadScheduler, analyticsClient, membershipHandler, authHandler, authMiddleware)
 
 			// 健康检查
 			server.Engine.GET("/health", func(c *gin.Context) {
@@ -409,13 +428,20 @@ func registerHandlers(
 	taskStepService *services.TaskStepService,
 	uploadScheduler *chain_task.UploadScheduler,
 	analyticsClient *analytics.Client,
+	membershipHandler *membership.MembershipHandler,
+	authHandler *auth.AuthHandler,
+	authMiddleware *auth.AuthMiddleware,
 ) {
 	logger.Info("Registering handlers...")
 
-	// 认证 Handler
-	authHandler := handler.NewAuthHandler(server)
-	authHandler.RegisterRoutes(server)
-	logger.Info("✓ Auth routes registered")
+	// 旧的认证 Handler (B站扫码登录)
+	oldAuthHandler := handler.NewAuthHandler(server)
+	oldAuthHandler.RegisterRoutes(server)
+	logger.Info("✓ Bilibili Auth routes registered")
+
+	// 新的认证 Handler (JWT + App 认证)
+	authHandler.RegisterRoutes(server.Engine.Group("/api/v1"))
+	logger.Info("✓ JWT Auth routes registered")
 
 	// 上传 Handler
 	uploadHandler := handler.NewUploadHandler(server)
@@ -448,6 +474,10 @@ func registerHandlers(
 	configHandler := handler.NewConfigHandler(server)
 	configHandler.RegisterRoutes(server)
 	logger.Info("✓ Config routes registered")
+
+	// 会员 Handler
+	membershipHandler.RegisterRoutes(server.Engine.Group("/api/v1"))
+	logger.Info("✓ Membership routes registered")
 
 	logger.Info("All handlers registered successfully")
 }

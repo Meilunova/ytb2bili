@@ -53,6 +53,15 @@ type User struct {
 	Avatar      string     `gorm:"size:255" json:"avatar"`
 	Status      int        `gorm:"default:1" json:"status"` // 1:正常 0:禁用
 	LastLoginAt *time.Time `json:"last_login_at"`
+
+	// 会员系统字段
+	MembershipTier   string     `gorm:"size:20;default:free" json:"membership_tier"` // 会员等级: free/basic/pro/enterprise
+	MembershipExpire *time.Time `json:"membership_expire"`                           // 会员到期时间
+	SubscriptionID   string     `gorm:"size:100" json:"subscription_id"`             // 支付平台订阅ID
+	BoostPackVideos  int        `gorm:"default:0" json:"boost_pack_videos"`          // 加油包剩余视频数
+	BoostPackExpire  *time.Time `json:"boost_pack_expire"`                           // 加油包到期时间
+	DailyUsageCount  int        `gorm:"default:0" json:"daily_usage_count"`          // 今日使用量
+	DailyUsageDate   string     `gorm:"size:10" json:"daily_usage_date"`             // 使用量统计日期 (YYYY-MM-DD)
 }
 
 type SubtitleItem struct {
@@ -75,24 +84,61 @@ type SavedVideoSubtitle struct {
 // SavedVideo 保存的视频信息
 type SavedVideo struct {
 	BaseModel
-	VideoID          string `gorm:"type:varchar(100);uniqueIndex;not null" json:"video_id"`    // 视频ID（唯一）
-	URL              string `gorm:"type:varchar(500);not null;index" json:"url"`               // 视频URL
-	Title            string `gorm:"type:varchar(500)" json:"title"`                            // 视频标题
-	Status           string `gorm:"type:varchar(20)" json:"status"`                            // 视频状态
-	Description      string `gorm:"type:text" json:"description"`                              // 视频描述
-	GeneratedTitle   string `gorm:"type:varchar(500)" json:"generated_title"`                  // AI生成的标题
-	GeneratedDesc    string `gorm:"type:text" json:"generated_desc"`                           // AI生成的描述
-	GeneratedTags    string `gorm:"type:varchar(1000)" json:"generated_tags"`                  // AI生成的标签（逗号分隔）
-	BiliBVID         string `gorm:"type:varchar(50)" json:"bili_bvid"`                         // Bilibili BVID
-	BiliAID          int64  `gorm:"type:bigint" json:"bili_aid"`                               // Bilibili AID
-	OperationType    string `gorm:"type:varchar(50)" json:"operation_type"`                    // 操作类型 (download/upload等)
-	Subtitles        string `gorm:"type:longtext" json:"subtitles"`                           // 字幕JSON字符串
-	PlaylistID       string `gorm:"type:varchar(100);index" json:"playlist_id"`                // 播放列表ID
-	Timestamp        string `gorm:"type:varchar(50)" json:"timestamp"`                         // 时间戳
-	SavedAt          string `gorm:"type:varchar(50)" json:"saved_at"`                          // 保存时间
+	VideoID        string `gorm:"type:varchar(100);uniqueIndex;not null" json:"video_id"` // 视频ID（唯一）
+	URL            string `gorm:"type:varchar(500);not null;index" json:"url"`            // 视频URL
+	Title          string `gorm:"type:varchar(500)" json:"title"`                         // 视频标题
+	Status         string `gorm:"type:varchar(20)" json:"status"`                         // 视频状态
+	Description    string `gorm:"type:text" json:"description"`                           // 视频描述
+	GeneratedTitle string `gorm:"type:varchar(500)" json:"generated_title"`               // AI生成的标题
+	GeneratedDesc  string `gorm:"type:text" json:"generated_desc"`                        // AI生成的描述
+	GeneratedTags  string `gorm:"type:varchar(1000)" json:"generated_tags"`               // AI生成的标签（逗号分隔）
+	BiliBVID       string `gorm:"type:varchar(50)" json:"bili_bvid"`                      // Bilibili BVID
+	BiliAID        int64  `gorm:"type:bigint" json:"bili_aid"`                            // Bilibili AID
+	OperationType  string `gorm:"type:varchar(50)" json:"operation_type"`                 // 操作类型 (download/upload等)
+	Subtitles      string `gorm:"type:longtext" json:"subtitles"`                         // 字幕JSON字符串
+	PlaylistID     string `gorm:"type:varchar(100);index" json:"playlist_id"`             // 播放列表ID
+	Timestamp      string `gorm:"type:varchar(50)" json:"timestamp"`                      // 时间戳
+	SavedAt        string `gorm:"type:varchar(50)" json:"saved_at"`                       // 保存时间
 }
 
 // TableName 指定表名
 func (SavedVideo) TableName() string {
 	return "cw_saved_videos"
+}
+
+// App 应用/客户端模型 (用于 appId + appSecret 鉴权)
+type App struct {
+	BaseModel
+	AppID       string `gorm:"uniqueIndex;size:64;not null" json:"app_id"` // 应用ID
+	AppSecret   string `gorm:"size:128;not null" json:"-"`                 // 应用密钥 (不返回给前端)
+	Name        string `gorm:"size:100;not null" json:"name"`              // 应用名称
+	Description string `gorm:"size:500" json:"description"`                // 描述
+	Status      int    `gorm:"default:1" json:"status"`                    // 状态: 1=启用, 0=禁用
+	RateLimit   int    `gorm:"default:1000" json:"rate_limit"`             // 每日请求限制
+	AllowedIPs  string `gorm:"type:text" json:"allowed_ips"`               // 允许的IP白名单 (JSON数组)
+	OwnerID     *uint  `gorm:"index" json:"owner_id"`                      // 所属用户ID (可选)
+	Owner       *User  `gorm:"foreignKey:OwnerID" json:"owner,omitempty"`  // 所属用户
+}
+
+// TableName 指定表名
+func (App) TableName() string {
+	return "cw_apps"
+}
+
+// UserToken 用户 Token 记录 (用于 JWT 黑名单/刷新等)
+type UserToken struct {
+	BaseModel
+	UserID       uint      `gorm:"index;not null" json:"user_id"`
+	User         User      `gorm:"foreignKey:UserID" json:"-"`
+	TokenHash    string    `gorm:"uniqueIndex;size:64;not null" json:"-"` // Token 哈希 (用于黑名单)
+	RefreshToken string    `gorm:"size:256" json:"-"`                     // 刷新 Token
+	DeviceInfo   string    `gorm:"size:255" json:"device_info"`           // 设备信息
+	IP           string    `gorm:"size:45" json:"ip"`                     // 登录IP
+	ExpiresAt    time.Time `json:"expires_at"`                            // 过期时间
+	IsRevoked    bool      `gorm:"default:false" json:"is_revoked"`       // 是否已撤销
+}
+
+// TableName 指定表名
+func (UserToken) TableName() string {
+	return "cw_user_tokens"
 }

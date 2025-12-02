@@ -125,6 +125,14 @@ func (g *GeminiClient) GenerateMetadataFromVideo(ctx context.Context, videoFile 
 	model.SetMaxOutputTokens(int32(g.maxTokens))
 	model.SetTemperature(0.7)
 
+	// 设置安全设置 - 降低过滤级别以处理更多类型的视频内容
+	model.SafetySettings = []*genai.SafetySetting{
+		{Category: genai.HarmCategoryHarassment, Threshold: genai.HarmBlockNone},
+		{Category: genai.HarmCategoryHateSpeech, Threshold: genai.HarmBlockNone},
+		{Category: genai.HarmCategorySexuallyExplicit, Threshold: genai.HarmBlockNone},
+		{Category: genai.HarmCategoryDangerousContent, Threshold: genai.HarmBlockNone},
+	}
+
 	prompt := `请作为一个专业的 Bilibili UP 主，分析这个视频并生成以下内容：
 
 1. 一个吸引眼球的标题（严格控制在30个字以内，能够准确概括视频主题）
@@ -168,6 +176,14 @@ func (g *GeminiClient) GenerateMetadataFromText(ctx context.Context, subtitleTex
 	// 设置生成参数
 	model.SetMaxOutputTokens(int32(g.maxTokens))
 	model.SetTemperature(0.7)
+
+	// 设置安全设置 - 降低过滤级别以处理更多类型的内容
+	model.SafetySettings = []*genai.SafetySetting{
+		{Category: genai.HarmCategoryHarassment, Threshold: genai.HarmBlockNone},
+		{Category: genai.HarmCategoryHateSpeech, Threshold: genai.HarmBlockNone},
+		{Category: genai.HarmCategorySexuallyExplicit, Threshold: genai.HarmBlockNone},
+		{Category: genai.HarmCategoryDangerousContent, Threshold: genai.HarmBlockNone},
+	}
 
 	prompt := fmt.Sprintf(`请根据以下视频字幕内容，生成一个吸引人的视频标题、精炼介绍和3-5个相关标签。
 

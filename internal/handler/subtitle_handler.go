@@ -1,12 +1,13 @@
 package handler
 
 import (
-	"github.com/difyz9/ytb2bili/internal/core"
-	"github.com/difyz9/ytb2bili/pkg/store/model"
-	"github.com/difyz9/ytb2bili/pkg/utils"
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"github.com/difyz9/ytb2bili/internal/core"
+	"github.com/difyz9/ytb2bili/pkg/store/model"
+	"github.com/difyz9/ytb2bili/pkg/utils"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -71,7 +72,7 @@ func (h *SubtitleHandler) saveVideoSubtitles(c *gin.Context) {
 	subtitlesJSONStr := string(subtitlesJSON)
 	fmt.Printf("字幕数据长度: %d 字符\n", len(subtitlesJSONStr))
 	fmt.Printf("字幕条目数量: %d\n", len(req.Subtitles))
-	
+
 	// 如果数据太大，截断前100个字符用于调试
 	if len(subtitlesJSONStr) > 100 {
 		fmt.Printf("字幕数据前100字符: %s...\n", subtitlesJSONStr[:100])
@@ -97,7 +98,7 @@ func (h *SubtitleHandler) saveVideoSubtitles(c *gin.Context) {
 		existingVideo.PlaylistID = req.PlaylistID
 		existingVideo.Timestamp = req.Timestamp
 		existingVideo.SavedAt = req.SavedAt
-		existingVideo.Status = "001" // 重置状态为待处理
+		existingVideo.Status = "001"               // 重置状态为待处理
 		existingVideo.DeletedAt = gorm.DeletedAt{} // 恢复记录（清除删除标记）
 
 		// 更新到数据库（使用 Unscoped 以便更新已删除的记录）
@@ -110,7 +111,7 @@ func (h *SubtitleHandler) saveVideoSubtitles(c *gin.Context) {
 			return
 		}
 		savedVideo = &existingVideo
-		
+
 		if existingVideo.DeletedAt.Valid {
 			fmt.Printf("✅ 恢复已删除的视频: %s\n", videoID)
 		}

@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { User, LogOut, Settings, BarChart3, Clock, Puzzle } from 'lucide-react';
+import { User, LogOut, Settings, BarChart3, Clock, Puzzle, Crown } from 'lucide-react';
+import { MembershipCard, QuotaDisplay, UpgradeModal } from '@/components/membership';
 
 interface UserInfo {
   id: string;
@@ -23,6 +24,7 @@ interface AppLayoutWithAuthProps extends AppLayoutProps {
 
 export default function AppLayout({ children, user, onLogout }: AppLayoutWithAuthProps) {
   const pathname = usePathname();
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
   // 已登录状态 - 显示完整的应用布局
   return (
@@ -38,6 +40,12 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutWithAut
             </div>
             
             <div className="flex items-center space-x-4">
+              {/* 配额显示 */}
+              <div className="flex items-center gap-2 px-3 py-1 bg-gray-50 rounded-lg">
+                <span className="text-xs text-gray-500">配额</span>
+                <QuotaDisplay compact />
+              </div>
+
               <div className="flex items-center space-x-2 text-sm text-gray-600">
                 <User className="w-4 h-4" />
                 <span>{user.name}</span>
@@ -119,6 +127,20 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutWithAut
                 
                 <li>
                   <Link
+                    href="/membership"
+                    className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-left transition-colors ${
+                      pathname === '/membership'
+                        ? 'bg-blue-50 text-blue-700'
+                        : 'text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    <Crown className="w-5 h-5" />
+                    <span>会员中心</span>
+                  </Link>
+                </li>
+
+                <li>
+                  <Link
                     href="/settings"
                     className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-left transition-colors ${
                       pathname === '/settings'
@@ -132,6 +154,11 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutWithAut
                 </li>
               </ul>
             </nav>
+
+            {/* 会员信息卡片 */}
+            <div className="mt-4">
+              <MembershipCard onUpgradeClick={() => setShowUpgradeModal(true)} />
+            </div>
           </div>
 
           {/* 主内容区 */}
@@ -140,6 +167,12 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutWithAut
           </div>
         </div>
       </div>
+
+      {/* 升级弹窗 */}
+      <UpgradeModal 
+        isOpen={showUpgradeModal} 
+        onClose={() => setShowUpgradeModal(false)} 
+      />
     </div>
   );
 }

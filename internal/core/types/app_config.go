@@ -29,9 +29,23 @@ type AppConfig struct {
 	ProxyConfig            *ProxyConfig            `toml:"ProxyConfig"`            // 代理配置
 	AnalyticsConfig        *AnalyticsConfig        `toml:"AnalyticsConfig"`        // 数据分析配置
 	BilibiliConfig         *BilibiliConfig         `toml:"BilibiliConfig"`         // Bilibili上传配置
+	MembershipConfig       *MembershipConfig       `toml:"MembershipConfig"`       // 会员系统配置
 
 	// AI服务选择配置
 	PrimaryAIService string `toml:"primary_ai_service"` // 用户选择的首选AI服务: openai_compatible, deepseek, gemini
+}
+
+// MembershipConfig 会员系统配置
+type MembershipConfig struct {
+	Enabled bool        `toml:"enabled"` // 是否启用会员系统
+	Redis   RedisConfig `toml:"redis"`   // Redis 配置
+}
+
+// RedisConfig Redis 配置
+type RedisConfig struct {
+	Addr     string `toml:"addr"`     // Redis 地址 (例如: localhost:6379)
+	Password string `toml:"password"` // Redis 密码
+	DB       int    `toml:"db"`       // Redis 数据库编号
 }
 
 // BilibiliConfig Bilibili上传配置
@@ -320,6 +334,16 @@ func NewDefaultConfig() *AppConfig {
 			UpCloseReply:       0,         // 默认开启评论
 			UpCloseReward:      0,         // 默认开启打赏
 		},
+
+		// 会员系统配置（默认值，可被 config.toml 覆盖）
+		MembershipConfig: &MembershipConfig{
+			Enabled: false, // 默认不启用会员系统
+			Redis: RedisConfig{
+				Addr:     "localhost:6379",
+				Password: "",
+				DB:       1,
+			},
+		},
 	}
 }
 
@@ -352,6 +376,7 @@ func LoadConfig(configFile string) (*AppConfig, error) {
 		ProxyConfig            *ProxyConfig            `toml:"ProxyConfig"`
 		AnalyticsConfig        *AnalyticsConfig        `toml:"AnalyticsConfig"`
 		BilibiliConfig         *BilibiliConfig         `toml:"BilibiliConfig"`
+		MembershipConfig       *MembershipConfig       `toml:"MembershipConfig"`
 	}
 
 	// 解码TOML配置文件
@@ -389,6 +414,9 @@ func LoadConfig(configFile string) (*AppConfig, error) {
 	if fileConfig.BilibiliConfig != nil {
 		config.BilibiliConfig = fileConfig.BilibiliConfig
 	}
+	if fileConfig.MembershipConfig != nil {
+		config.MembershipConfig = fileConfig.MembershipConfig
+	}
 
 	return config, nil
 }
@@ -411,6 +439,7 @@ func SaveConfig(config *AppConfig) error {
 		ProxyConfig            *ProxyConfig            `toml:"ProxyConfig"`
 		AnalyticsConfig        *AnalyticsConfig        `toml:"AnalyticsConfig"`
 		BilibiliConfig         *BilibiliConfig         `toml:"BilibiliConfig"`
+		MembershipConfig       *MembershipConfig       `toml:"MembershipConfig"`
 	}{
 		Listen:                 config.Listen,
 		Environment:            config.Environment,
@@ -426,6 +455,7 @@ func SaveConfig(config *AppConfig) error {
 		ProxyConfig:            config.ProxyConfig,
 		AnalyticsConfig:        config.AnalyticsConfig,
 		BilibiliConfig:         config.BilibiliConfig,
+		MembershipConfig:       config.MembershipConfig,
 	}
 
 	buf := new(bytes.Buffer)

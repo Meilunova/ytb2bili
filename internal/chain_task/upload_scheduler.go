@@ -1,15 +1,16 @@
 package chain_task
 
 import (
+	"fmt"
+	"path/filepath"
+	"sync"
+	"time"
+
 	"github.com/difyz9/ytb2bili/internal/chain_task/handlers"
 	"github.com/difyz9/ytb2bili/internal/chain_task/manager"
 	"github.com/difyz9/ytb2bili/internal/core"
 	"github.com/difyz9/ytb2bili/internal/core/services"
 	"github.com/difyz9/ytb2bili/internal/core/types"
-	"fmt"
-	"path/filepath"
-	"sync"
-	"time"
 
 	"github.com/robfig/cron/v3"
 	"go.uber.org/zap"
@@ -262,7 +263,7 @@ func (s *UploadScheduler) executeUploadTask(videoID, taskName string) error {
 // ExecuteManualUpload 手动执行上传任务（用于 Web 界面手动触发）
 func (s *UploadScheduler) ExecuteManualUpload(videoID, taskType string) error {
 	s.logger.Infof("🎯 手动执行上传任务: VideoID=%s, TaskType=%s", videoID, taskType)
-	
+
 	var taskName string
 	switch taskType {
 	case "video":
@@ -272,7 +273,6 @@ func (s *UploadScheduler) ExecuteManualUpload(videoID, taskType string) error {
 	default:
 		return fmt.Errorf("未知的任务类型: %s", taskType)
 	}
-	
+
 	return s.executeUploadTask(videoID, taskName)
 }
-

@@ -8,7 +8,15 @@ import type {
   QRCodeResponse, 
   LoginStatus, 
   VideoSubmissionRequest,
-  UploadValidation 
+  UploadValidation,
+  MembershipInfo,
+  TierConfig,
+  QuotaInfo,
+  AvailableFeatures,
+  FeatureCheckResult,
+  BoostPackStatus,
+  PurchaseBoostPackRequest,
+  PurchaseBoostPackResponse,
 } from '@/types';
 
 const API_BASE_URL = process.env.NODE_ENV === 'development' 
@@ -131,6 +139,44 @@ export const subtitleApi = {
   // 更新字幕
   updateSubtitles: (videoId: string, subtitles: any): Promise<ApiResponse> => {
     return api.put(`/subtitles/${videoId}`, { subtitles });
+  },
+};
+
+// 会员相关 API
+export const membershipApi = {
+  // 获取会员信息
+  getMembershipInfo: (): Promise<ApiResponse<MembershipInfo>> => {
+    return api.get('/membership/info');
+  },
+
+  // 获取所有等级配置
+  getAllTiers: (): Promise<ApiResponse<TierConfig[]>> => {
+    return api.get('/membership/tiers');
+  },
+
+  // 获取配额信息
+  getQuotaInfo: (): Promise<ApiResponse<QuotaInfo>> => {
+    return api.get('/membership/quota');
+  },
+
+  // 获取可用功能列表
+  getAvailableFeatures: (): Promise<ApiResponse<AvailableFeatures>> => {
+    return api.get('/membership/features');
+  },
+
+  // 检查功能是否可用
+  checkFeature: (feature: string): Promise<ApiResponse<FeatureCheckResult>> => {
+    return api.get(`/membership/features/${feature}/check`);
+  },
+
+  // 获取加油包状态
+  getBoostPackStatus: (): Promise<ApiResponse<BoostPackStatus>> => {
+    return api.get('/membership/boost-pack');
+  },
+
+  // 购买加油包
+  purchaseBoostPack: (data: PurchaseBoostPackRequest): Promise<ApiResponse<PurchaseBoostPackResponse>> => {
+    return api.post('/membership/boost-pack/purchase', data);
   },
 };
 

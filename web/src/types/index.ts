@@ -146,3 +146,6 @@ export const TASK_STEP_NAMES = {
   'upload_to_bilibili': '上传到B站',
   'upload_subtitles': '上传字幕',
 } as const;
+
+// 导出会员类型
+export * from './membership';

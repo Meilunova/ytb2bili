@@ -1,13 +1,14 @@
 package core
 
 import (
-	"github.com/difyz9/ytb2bili/internal/core/types"
-	"github.com/difyz9/ytb2bili/pkg/cos"
 	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/difyz9/ytb2bili/internal/core/types"
+	"github.com/difyz9/ytb2bili/pkg/cos"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"

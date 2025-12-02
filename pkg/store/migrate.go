@@ -11,5 +11,7 @@ func MigrateDatabase(db *gorm.DB) error {
 		&model.User{},
 		&model.SavedVideo{},
 		&model.TaskStep{},
+		&model.App{},
+		&model.UserToken{},
 	)
 }
